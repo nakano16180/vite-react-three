@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Line } from "@react-three/drei";
+import { Line, OrbitControls } from "@react-three/drei";
 import * as duckdb from "@duckdb/duckdb-wasm";
 import { bundle } from "./dbBundles";
 
@@ -50,15 +50,32 @@ export default function App() {
         const _db = new duckdb.AsyncDuckDB(logger, worker);
         await _db.instantiate(bundle.mainModule, bundle.pthreadWorker);
         const _conn = await _db.connect();
+        
+        let spatialOK = false;
         try {
           await _conn.query(`INSTALL spatial;`);
           await _conn.query(`LOAD spatial;`);
           setSpatialLoaded(true);
+          spatialOK = true;
         } catch (e) {
           console.warn("spatial extension load failed:", e);
           setSpatialLoaded(false);
         }
+
+        // フォールバック用の JSON テーブルは常に用意
+        await _conn.query(`
+          CREATE TABLE IF NOT EXISTS strokes_json (
+            id    TEXT PRIMARY KEY,
+            coords JSON,
+            color VARCHAR,
+            width DOUBLE,
+            created_at TIMESTAMP DEFAULT now()
+          );
+        `);
+
+        // spatial が使える環境では GEOMETRY テーブルも作成
         // id は TEXT にして、ブラウザ側で UUID を付与（uuid 拡張不要）
+        if (spatialOK){
         await _conn.query(`
           CREATE TABLE IF NOT EXISTS strokes (
             id    TEXT PRIMARY KEY,
@@ -68,6 +85,8 @@ export default function App() {
             created_at TIMESTAMP DEFAULT now()
           );
         `);
+        }
+
         if (!cancelled) setDbConn(_conn);
       } finally {
         if (!cancelled) setLoading(false);
@@ -80,29 +99,54 @@ export default function App() {
 
  // DB → strokes を読み直し
   const reloadFromDB = async () => {
-    if (!dbConn || !spatialLoaded) return;
-    const res = await dbConn.query(`
-      SELECT id, color, width, ST_AsGeoJSON(geom) AS gj
-      FROM strokes
+    if (!dbConn) return;
+    const list: Stroke[] = [];
+
+    if (spatialLoaded){
+      const res = await dbConn.query(`
+        SELECT id, color, width, ST_AsGeoJSON(geom) AS gj
+        FROM strokes
+        ORDER BY created_at ASC;
+      `);
+      const rows = res.toArray();
+      for (const row of rows) {
+        const obj = row.toJSON() as Record<string, unknown>;
+        const id = toStr(obj["id"]);
+        const color = toStr(obj["color"]) || "#222";
+        const widthRaw = toNum(obj["width"]);
+        const width = Number.isFinite(widthRaw) ? widthRaw : 3;
+        const gj = JSON.parse(toStr(obj["gj"]));
+        list.push({ id, color, width, ptsPx: parseLineStringFromGeoJSON(gj) });
+      }
+    }
+
+    // JSON 方式（フォールバック/併用）
+    const resJ = await dbConn.query(`
+      SELECT id, color, width, coords
+      FROM strokes_json
       ORDER BY created_at ASC;
     `);
-    const rows = res.toArray();
-    const list: Stroke[] = [];
-    for (const row of rows) {
+    const rowsJ = resJ.toArray();
+    for (const row of rowsJ) {
       const obj = row.toJSON() as Record<string, unknown>;
       const id = toStr(obj["id"]);
       const color = toStr(obj["color"]) || "#222";
       const widthRaw = toNum(obj["width"]);
       const width = Number.isFinite(widthRaw) ? widthRaw : 3;
-      const gj = JSON.parse(toStr(obj["gj"]));
-      list.push({ id, color, width, ptsPx: parseLineStringFromGeoJSON(gj) });
+      const coordsStr = toStr(obj["coords"]);
+      let pts: [number, number][] = [];
+      try {
+        const a = JSON.parse(coordsStr);
+        if (Array.isArray(a)) pts = a as [number, number][];
+      } catch {}
+      list.push({ id, color, width, ptsPx: pts });
     }
 
     setStrokes(list);
   };
 
   useEffect(() => {
-    if (!dbConn || !spatialLoaded) return;
+    if (!dbConn) return;
     reloadFromDB();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbConn, spatialLoaded]);
@@ -110,49 +154,70 @@ export default function App() {
   // 直前のストローク削除（Undo）
   const handleUndo = async () => {
     if (!dbConn) return;
-    await dbConn.query(`
-      DELETE FROM strokes WHERE id IN (
-        SELECT id FROM strokes ORDER BY created_at DESC LIMIT 1
-      );
-    `);
+    if (spatialLoaded) {
+      await dbConn.query(`
+        DELETE FROM strokes WHERE id IN (
+          SELECT id FROM strokes ORDER BY created_at DESC LIMIT 1
+        );
+      `);
+    } else {
+      await dbConn.query(`
+        DELETE FROM strokes_json WHERE id IN (
+          SELECT id FROM strokes_json ORDER BY created_at DESC LIMIT 1
+        );
+      `);
+    }
     await reloadFromDB();
   };
 
   const handleClear = async () => {
     if (!dbConn) return;
-    await dbConn.query(`DELETE FROM strokes;`);
+    if (spatialLoaded) {
+      await dbConn.query(`DELETE FROM strokes;`);
+    }
+    await dbConn.query(`DELETE FROM strokes_json;`);
     await reloadFromDB();
   };
 
   const handleRefresh = async () => reloadFromDB();
 
 
-// ドラッグ終了時に DB に保存
+  // ドラッグ終了時に DB に保存
   const persistStroke = async (ptsPx: [number, number][]) => {
-    if (!dbConn || !spatialLoaded || ptsPx.length < 2) return;
-    const wkt = String(toWKT(ptsPx));  // 念のため明示的に文字列化
-    const newId = (globalThis as any).crypto?.randomUUID
-      ? (globalThis as any).crypto.randomUUID()
-      : Math.random().toString(36).slice(2);
+    if (!dbConn || ptsPx.length < 2) return;
 
-    console.debug("WKT typeof:", typeof wkt, "len:", wkt.length, wkt.slice(0, 80));
+    if (spatialLoaded) {
+      const wkt = String(toWKT(ptsPx));
+      const newId = (globalThis as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
 
-    // INSERT (prepared statement)
-    const insert = await dbConn.prepare(`INSERT INTO strokes(id, geom, color, width)  VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?);`);
-    await insert.query(newId, wkt, strokeColor, strokeWidth);
-    await insert.close();
+      const insert = await dbConn.prepare(
+        `INSERT INTO strokes(id, geom, color, width) VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?);`
+      );
+      await insert.query(newId, wkt, strokeColor, strokeWidth);
+      await insert.close();
 
-     if (simplifyOn) {
-       const upd = await dbConn.prepare(`UPDATE strokes SET geom = ST_Simplify(geom, ?) WHERE id = ?;`);
-      await upd.query(Math.max(0, Math.min(strokeWidth * 0.3, 3)), newId);
-      await upd.close();
+      if (simplifyOn) {
+        const upd = await dbConn.prepare(
+          `UPDATE strokes SET geom = ST_Simplify(geom, ?) WHERE id = ?;`
+        );
+        await upd.query(Math.max(0, Math.min(strokeWidth * 0.3, 3)), newId);
+        await upd.close();
+      }
+    } else {
+      const newId = (globalThis as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+      const insertJ = await dbConn.prepare(
+        `INSERT INTO strokes_json(id, coords, color, width) VALUES (?, ?, ?, ?);`
+      );
+      await insertJ.query(newId, JSON.stringify(ptsPx), strokeColor, strokeWidth);
+      await insertJ.close();
     }
 
     await reloadFromDB();
   };
 
+
   return (
-    <div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", background: "#f5f5f5" }}>
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#f5f5f5" }}>
       <header style={{ padding: 12, display: "flex", gap: 8, alignItems: "center", borderBottom: "1px solid #e5e5e5", background: "#fff" }}>
         <h1 style={{ fontSize: 16, fontWeight: 600 }}>DuckDB Spatial × R3F — Line Draw</h1>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
@@ -172,55 +237,36 @@ export default function App() {
       <main style={{ flex: 1, padding: 12, minHeight: 0 }}>
         {/* 親は高さを持つだけ。装飾は持たせない */}
         <div style={{ position: "relative", width: "100%", height: "100%" }}>
-          {/* 1) Canvas は absolute で inset:0（%高さの連鎖を断つ） */}
+          {/* Canvas は absolute で inset:0（%高さ連鎖を断つ） */}
           <div style={{ position: "absolute", inset: 0 }}>
             <Canvas orthographic camera={{ position: [0, 0, 100], zoom: 1 }} style={{ width: "100%", height: "100%" }}>
               <color attach="background" args={["#ffffff"]} />
               <ambientLight intensity={0.5} />
+              {/* 画面操作 */}
+              <OrbitControls makeDefault enableRotate={false} />
+
               <Scene strokes={strokes} />
               <DrawingSurface onFinish={persistStroke} color={strokeColor} width={strokeWidth} />
             </Canvas>
           </div>
 
-          {/* 2) ローディング/警告オーバーレイ（absolute） */}
+          {/* ローディング/警告オーバーレイ */}
           {loading && (
-            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12, color: "#666" }}>
-              DuckDB を初期化中…
-            </div>
+            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12, color: "#666" }}>DuckDB を初期化中…</div>
           )}
           {!loading && !spatialLoaded && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "grid",
-                placeItems: "center",
-                fontSize: 12,
-                color: "#b45309",
-                padding: 16,
-                textAlign: "center",
-              }}
-            >
+            <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12, color: "#b45309", padding: 16, textAlign: "center" }}>
               spatial 拡張のロードに失敗しました。環境によっては利用できない場合があります。<br />
               その場合、保存・再描画が動作しません（コンソールのログをご確認ください）。
             </div>
           )}
-        </div>
 
-        {/* 3) 枠の装飾は最後に重ねる（pointer-events: none で操作に干渉しない） */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            borderRadius: 16,
-            boxShadow: "0 1px 8px rgba(0,0,0,.05)",
-            border: "1px solid #e5e5e5",
-          }}
-        />
+          {/* 枠の装飾はオーバーレイに分離 */}
+          <div style={{ position: "absolute", inset: 0, pointerEvents: "none", borderRadius: 16, boxShadow: "0 1px 8px rgba(0,0,0,.05)", border: "1px solid #e5e5e5" }} />
+        </div>
       </main>
 
-      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>左ドラッグで描画 / Undo・Clear はヘッダーから操作</footer>
+      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>左ドラッグで描画 / パン・ズーム可（ホイール/ドラッグ） / Undo・Clear はヘッダーから</footer>
     </div>
   );
 }
@@ -263,6 +309,9 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
     const y = ((viewport.height / 2 - wy) / viewport.height) * size.height;
     return [x, y];
   };
+  
+  // 近すぎる点をスキップして無駄な頂点を減らす
+  const MIN_DIST = 1.5; // px
 
   const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
 
@@ -277,8 +326,12 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
   const onPointerMove = (e: any) => {
     if (!drawing) return;
     const p = e.point as { x: number; y: number; z: number };
-    setPreviewWorld((prev) => [...prev, [p.x, p.y, 0]]);
-    ptsPxRef.current.push(worldToPx(p.x, p.y));
+    const [x, y] = worldToPx(p.x, p.y);
+    const last = ptsPxRef.current[ptsPxRef.current.length - 1];
+    if (!last || Math.hypot(x - last[0], y - last[1]) >= MIN_DIST) {
+      ptsPxRef.current.push([x, y]);
+      setPreviewWorld((prev) => [...prev, [p.x, p.y, 0]]);
+    }
   };
 
   const onPointerUp = async () => {
