@@ -66,3 +66,9 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+html, body, #root { height: 100%; margin: 0; }
+* { box-sizing: border-box; }
+/* 親flex子のオーバーフロー増殖対策 */
+#root > div { height: 100%; display: flex; flex-direction: column; }
+main { min-height: 0; } /* ←これ重要。子の%高さでの増殖を防ぐ */
