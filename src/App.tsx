@@ -354,7 +354,7 @@ function Scene({ strokes, pointClouds }: { strokes: Stroke[], pointClouds: Point
         <Line key={s.id} points={s.points} color={s.color} lineWidth={s.width} />
       ))}
       {pointClouds.map((cloud, index) => (
-        <PointCloud key={`cloud-${index}`} data={cloud} pointSize={0.05} />
+        <PointCloud key={`cloud-${index}`} data={cloud} pointSize={0.5} />
       ))}
     </group>
   );
