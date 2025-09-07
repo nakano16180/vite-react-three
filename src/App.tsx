@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Line, OrbitControls } from "@react-three/drei";
 import * as duckdb from "@duckdb/duckdb-wasm";
 import { bundle } from "./dbBundles";
+import { PointCloud } from "./PointCloud";
+import { parsePCDFile, type PointCloudData } from "./pcdParser";
 
 
 // DuckDB への保存は px 座標（画面座標）で行います
@@ -13,8 +15,8 @@ const toWKT = (ptsPx: [number, number][]) => {
   return `LINESTRING(${body})`;
 };
 
-const parseLineStringFromGeoJSON = (gj: any): [number, number][] => {
-  if (!gj || gj.type !== "LineString") return [];
+const parseLineStringFromGeoJSON = (gj: { type?: string; coordinates?: [number, number][] }): [number, number][] => {
+  if (!gj || gj.type !== "LineString" || !gj.coordinates) return [];
   return gj.coordinates.map((c: [number, number]) => [c[0], c[1]]);
 };
 
@@ -33,6 +35,7 @@ export default function App() {
   const [spatialLoaded, setSpatialLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [pointClouds, setPointClouds] = useState<PointCloudData[]>([]);
 
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [strokeWidth, setStrokeWidth] = useState(4);
@@ -138,7 +141,9 @@ export default function App() {
       try {
         const a = JSON.parse(coordsStr);
         if (Array.isArray(a)) pts = a as [number, number][];
-      } catch {}
+      } catch {
+        // Ignore parsing errors, use empty array
+      }
       list.push({ id, color, width, ptsPx: pts });
     }
 
@@ -181,6 +186,38 @@ export default function App() {
 
   const handleRefresh = async () => reloadFromDB();
 
+  // Handle PCD file loading
+  const handleFileLoad = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.pcd')) {
+      alert('Please select a PCD file');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      if (content) {
+        const pointCloudData = parsePCDFile(content);
+        if (pointCloudData) {
+          setPointClouds(prev => [...prev, pointCloudData]);
+        } else {
+          alert('Failed to parse PCD file. Please check the file format.');
+        }
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset the input so the same file can be loaded again
+    event.target.value = '';
+  };
+
+  const handleClearPointClouds = () => {
+    setPointClouds([]);
+  };
+
 
   // ドラッグ終了時に DB に保存
   const persistStroke = async (ptsPx: [number, number][]) => {
@@ -188,7 +225,7 @@ export default function App() {
 
     if (spatialLoaded) {
       const wkt = String(toWKT(ptsPx));
-      const newId = (globalThis as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+      const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
 
       const insert = await dbConn.prepare(
         `INSERT INTO strokes(id, geom, color, width) VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?);`
@@ -204,7 +241,7 @@ export default function App() {
         await upd.close();
       }
     } else {
-      const newId = (globalThis as any).crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+      const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
       const insertJ = await dbConn.prepare(
         `INSERT INTO strokes_json(id, coords, color, width) VALUES (?, ?, ?, ?);`
       );
@@ -219,7 +256,7 @@ export default function App() {
   return (
     <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#f5f5f5" }}>
       <header style={{ padding: 12, display: "flex", gap: 8, alignItems: "center", borderBottom: "1px solid #e5e5e5", background: "#fff" }}>
-        <h1 style={{ fontSize: 16, fontWeight: 600 }}>DuckDB Spatial × R3F — Line Draw</h1>
+        <h1 style={{ fontSize: 16, fontWeight: 600 }}>DuckDB Spatial × R3F — Line Draw & PCD Viewer</h1>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <label style={{ fontSize: 12 }}>色</label>
           <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} style={{ height: 32, width: 40 }} />
@@ -231,6 +268,28 @@ export default function App() {
           <button onClick={handleUndo}>Undo</button>
           <button onClick={handleRefresh}>Refresh</button>
           <button onClick={handleClear} style={{ color: "#c00" }}>Clear</button>
+          
+          {/* PCD File Loading */}
+          <div style={{ marginLeft: 16, borderLeft: "1px solid #e5e5e5", paddingLeft: 16, display: "flex", gap: 8, alignItems: "center" }}>
+            <label htmlFor="pcd-file-input" style={{ cursor: "pointer", padding: "4px 8px", backgroundColor: "#007bff", color: "white", borderRadius: 4, fontSize: 12 }}>
+              Load PCD File
+            </label>
+            <input 
+              id="pcd-file-input"
+              type="file" 
+              accept=".pcd"
+              onChange={handleFileLoad} 
+              style={{ display: "none" }}
+            />
+            {pointClouds.length > 0 && (
+              <>
+                <span style={{ fontSize: 12, color: "#666" }}>
+                  {pointClouds.length} cloud{pointClouds.length > 1 ? 's' : ''} loaded
+                </span>
+                <button onClick={handleClearPointClouds} style={{ color: "#c00", fontSize: 12 }}>Clear Clouds</button>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -245,7 +304,7 @@ export default function App() {
               {/* 画面操作 */}
               <OrbitControls makeDefault enableRotate={false} />
 
-              <Scene strokes={strokes} />
+              <Scene strokes={strokes} pointClouds={pointClouds} />
               <DrawingSurface onFinish={persistStroke} color={strokeColor} width={strokeWidth} />
             </Canvas>
           </div>
@@ -266,21 +325,21 @@ export default function App() {
         </div>
       </main>
 
-      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>左ドラッグで描画 / パン・ズーム可（ホイール/ドラッグ） / Undo・Clear はヘッダーから</footer>
+      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>左ドラッグで描画 / パン・ズーム可（ホイール/ドラッグ） / Undo・Clear はヘッダーから / PCDファイル読み込み対応</footer>
     </div>
   );
 }
 
-function Scene({ strokes }: { strokes: Stroke[] }) {
+function Scene({ strokes, pointClouds }: { strokes: Stroke[], pointClouds: PointCloudData[] }) {
   const { size, viewport } = useThree();
 
-  const pxToWorld = (x: number, y: number): [number, number, number] => {
-    const wx = (x / size.width) * viewport.width - viewport.width / 2;
-    const wy = viewport.height / 2 - (y / size.height) * viewport.height;
-    return [wx, wy, 0];
-  };
-
   const strokeLines = useMemo(() => {
+    const pxToWorld = (x: number, y: number): [number, number, number] => {
+      const wx = (x / size.width) * viewport.width - viewport.width / 2;
+      const wy = viewport.height / 2 - (y / size.height) * viewport.height;
+      return [wx, wy, 0];
+    };
+    
     return strokes.map((s) => ({
       id: s.id,
       color: s.color,
@@ -292,7 +351,10 @@ function Scene({ strokes }: { strokes: Stroke[] }) {
   return (
     <group>
       {strokeLines.map((s) => (
-        <Line key={s.id} points={s.points as any} color={s.color} lineWidth={s.width} />
+        <Line key={s.id} points={s.points} color={s.color} lineWidth={s.width} />
+      ))}
+      {pointClouds.map((cloud, index) => (
+        <PointCloud key={`cloud-${index}`} data={cloud} pointSize={0.05} />
       ))}
     </group>
   );
@@ -315,17 +377,17 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
 
   const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
 
-  const onPointerDown = (e: any) => {
+  const onPointerDown = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
     e.stopPropagation();
     setDrawing(true);
-    const p = e.point as { x: number; y: number; z: number };
+    const p = e.point;
     setPreviewWorld([[p.x, p.y, 0]]);
     ptsPxRef.current = [worldToPx(p.x, p.y)];
   };
 
-  const onPointerMove = (e: any) => {
+  const onPointerMove = (e: { point: { x: number; y: number; z: number } }) => {
     if (!drawing) return;
-    const p = e.point as { x: number; y: number; z: number };
+    const p = e.point;
     const [x, y] = worldToPx(p.x, p.y);
     const last = ptsPxRef.current[ptsPxRef.current.length - 1];
     if (!last || Math.hypot(x - last[0], y - last[1]) >= MIN_DIST) {
@@ -346,7 +408,7 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
   return (
     <group>
       {previewWorld.length >= 2 && (
-        <Line points={previewWorld as any} color={color} lineWidth={width} />
+        <Line points={previewWorld} color={color} lineWidth={width} />
       )}
       <mesh
         position={[0, 0, 0]}
