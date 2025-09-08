@@ -3,8 +3,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { Line, OrbitControls } from "@react-three/drei";
 import * as duckdb from "@duckdb/duckdb-wasm";
 import { bundle } from "./dbBundles";
-import { PointCloud } from "./PointCloud";
-import { parsePCDFile, type PointCloudData } from "./pcdParser";
+import { PCDFromFile } from "./PCDLoader";
 
 
 // DuckDB への保存は px 座標（画面座標）で行います
@@ -30,12 +29,15 @@ interface Stroke {
   ptsPx: [number, number][]; // DB は px 座標で保持
 }
 
+type InteractionMode = 'draw' | 'pan';
+
 export default function App() {
   const [dbConn, setDbConn] = useState<duckdb.AsyncDuckDBConnection | null>(null);
   const [spatialLoaded, setSpatialLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
-  const [pointClouds, setPointClouds] = useState<PointCloudData[]>([]);
+  const [pcdFileContents, setPcdFileContents] = useState<string[]>([]);
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>('draw');
 
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [strokeWidth, setStrokeWidth] = useState(4);
@@ -200,12 +202,7 @@ export default function App() {
     reader.onload = (e) => {
       const content = e.target?.result as string;
       if (content) {
-        const pointCloudData = parsePCDFile(content);
-        if (pointCloudData) {
-          setPointClouds(prev => [...prev, pointCloudData]);
-        } else {
-          alert('Failed to parse PCD file. Please check the file format.');
-        }
+        setPcdFileContents(prev => [...prev, content]);
       }
     };
     reader.readAsText(file);
@@ -215,7 +212,7 @@ export default function App() {
   };
 
   const handleClearPointClouds = () => {
-    setPointClouds([]);
+    setPcdFileContents([]);
   };
 
 
@@ -258,6 +255,39 @@ export default function App() {
       <header style={{ padding: 12, display: "flex", gap: 8, alignItems: "center", borderBottom: "1px solid #e5e5e5", background: "#fff" }}>
         <h1 style={{ fontSize: 16, fontWeight: 600 }}>DuckDB Spatial × R3F — Line Draw & PCD Viewer</h1>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Mode Toggle */}
+          <div style={{ display: "flex", gap: 4, alignItems: "center", marginRight: 16, borderRight: "1px solid #e5e5e5", paddingRight: 16 }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>Mode:</span>
+            <button 
+              onClick={() => setInteractionMode('draw')}
+              style={{ 
+                padding: "4px 8px", 
+                fontSize: 12, 
+                backgroundColor: interactionMode === 'draw' ? "#007bff" : "#f8f9fa", 
+                color: interactionMode === 'draw' ? "white" : "#212529",
+                border: "1px solid #dee2e6",
+                borderRadius: 4,
+                cursor: "pointer"
+              }}
+            >
+              Draw
+            </button>
+            <button 
+              onClick={() => setInteractionMode('pan')}
+              style={{ 
+                padding: "4px 8px", 
+                fontSize: 12, 
+                backgroundColor: interactionMode === 'pan' ? "#007bff" : "#f8f9fa", 
+                color: interactionMode === 'pan' ? "white" : "#212529",
+                border: "1px solid #dee2e6",
+                borderRadius: 4,
+                cursor: "pointer"
+              }}
+            >
+              Pan
+            </button>
+          </div>
+          
           <label style={{ fontSize: 12 }}>色</label>
           <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} style={{ height: 32, width: 40 }} />
           <label style={{ fontSize: 12, marginLeft: 8 }}>太さ</label>
@@ -281,10 +311,10 @@ export default function App() {
               onChange={handleFileLoad} 
               style={{ display: "none" }}
             />
-            {pointClouds.length > 0 && (
+            {pcdFileContents.length > 0 && (
               <>
                 <span style={{ fontSize: 12, color: "#666" }}>
-                  {pointClouds.length} cloud{pointClouds.length > 1 ? 's' : ''} loaded
+                  {pcdFileContents.length} cloud{pcdFileContents.length > 1 ? 's' : ''} loaded
                 </span>
                 <button onClick={handleClearPointClouds} style={{ color: "#c00", fontSize: 12 }}>Clear Clouds</button>
               </>
@@ -301,11 +331,20 @@ export default function App() {
             <Canvas orthographic camera={{ position: [0, 0, 100], zoom: 1 }} style={{ width: "100%", height: "100%" }}>
               <color attach="background" args={["#ffffff"]} />
               <ambientLight intensity={0.5} />
-              {/* 画面操作 */}
-              <OrbitControls makeDefault enableRotate={false} />
+              {/* 画面操作 - OrbitControls behavior changes based on interaction mode */}
+              <OrbitControls 
+                makeDefault 
+                enableRotate={false} 
+                enabled={interactionMode === 'pan'}
+              />
 
-              <Scene strokes={strokes} pointClouds={pointClouds} />
-              <DrawingSurface onFinish={persistStroke} color={strokeColor} width={strokeWidth} />
+              <Scene pcdFileContents={pcdFileContents} strokes={strokes} />
+              <DrawingSurface 
+                onFinish={persistStroke} 
+                color={strokeColor} 
+                width={strokeWidth} 
+                enabled={interactionMode === 'draw'}
+              />
             </Canvas>
           </div>
 
@@ -325,12 +364,14 @@ export default function App() {
         </div>
       </main>
 
-      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>左ドラッグで描画 / パン・ズーム可（ホイール/ドラッグ） / Undo・Clear はヘッダーから / PCDファイル読み込み対応</footer>
+      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
+        Draw モード: 左ドラッグで描画 | Pan モード: ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear はヘッダーから
+      </footer>
     </div>
   );
 }
 
-function Scene({ strokes, pointClouds }: { strokes: Stroke[], pointClouds: PointCloudData[] }) {
+function Scene({ strokes, pcdFileContents }: { strokes: Stroke[], pcdFileContents: string[] }) {
   const { size, viewport } = useThree();
 
   const strokeLines = useMemo(() => {
@@ -353,14 +394,14 @@ function Scene({ strokes, pointClouds }: { strokes: Stroke[], pointClouds: Point
       {strokeLines.map((s) => (
         <Line key={s.id} points={s.points} color={s.color} lineWidth={s.width} />
       ))}
-      {pointClouds.map((cloud, index) => (
-        <PointCloud key={`cloud-${index}`} data={cloud} pointSize={0.5} />
+      {pcdFileContents.map((content, index) => (
+        <PCDFromFile key={`pcd-${index}`} fileContent={content} pointSize={0.5} />
       ))}
     </group>
   );
 }
 
-function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number, number][]) => void | Promise<void>; color: string; width: number; }) {
+function DrawingSurface({ onFinish, color, width, enabled }: { onFinish: (ptsPx: [number, number][]) => void | Promise<void>; color: string; width: number; enabled: boolean; }) {
   const { size, viewport } = useThree();
   const [drawing, setDrawing] = useState(false);
   const [previewWorld, setPreviewWorld] = useState<[number, number, number][]>([]);
@@ -378,6 +419,7 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
   const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
 
   const onPointerDown = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
+    if (!enabled) return;
     e.stopPropagation();
     setDrawing(true);
     const p = e.point;
@@ -386,7 +428,7 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
   };
 
   const onPointerMove = (e: { point: { x: number; y: number; z: number } }) => {
-    if (!drawing) return;
+    if (!drawing || !enabled) return;
     const p = e.point;
     const [x, y] = worldToPx(p.x, p.y);
     const last = ptsPxRef.current[ptsPxRef.current.length - 1];
@@ -397,7 +439,7 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
   };
 
   const onPointerUp = async () => {
-    if (!drawing) return;
+    if (!drawing || !enabled) return;
     setDrawing(false);
     const ptsPx = ptsPxRef.current.slice();
     ptsPxRef.current = [];
@@ -407,7 +449,7 @@ function DrawingSurface({ onFinish, color, width }: { onFinish: (ptsPx: [number,
 
   return (
     <group>
-      {previewWorld.length >= 2 && (
+      {enabled && previewWorld.length >= 2 && (
         <Line points={previewWorld} color={color} lineWidth={width} />
       )}
       <mesh
