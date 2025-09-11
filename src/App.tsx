@@ -8,23 +8,17 @@ import { PCDFromFile } from "./PCDLoader";
 // DuckDB への保存は px 座標（画面座標）で行います
 const toWKT = (ptsPx: [number, number][]) => {
   // 非数値/NaN を除外して WKT を生成
-  const filtered = ptsPx.filter(
-    ([x, y]) => Number.isFinite(x) && Number.isFinite(y)
-  );
+  const filtered = ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
   const body = filtered.map(([x, y]) => `${x} ${y}`).join(", ");
   return `LINESTRING(${body})`;
 };
 
-const parseLineStringFromGeoJSON = (gj: {
-  type?: string;
-  coordinates?: [number, number][];
-}): [number, number][] => {
+const parseLineStringFromGeoJSON = (gj: { type?: string; coordinates?: [number, number][] }): [number, number][] => {
   if (!gj || gj.type !== "LineString" || !gj.coordinates) return [];
   return gj.coordinates.map((c: [number, number]) => [c[0], c[1]]);
 };
 
-const toStr = (v: unknown): string =>
-  typeof v === "string" ? v : v == null ? "" : String(v);
+const toStr = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
 const toNum = (v: unknown): number => (typeof v === "number" ? v : Number(v));
 
 interface Stroke {
@@ -37,15 +31,12 @@ interface Stroke {
 type InteractionMode = "draw" | "pan";
 
 export default function App() {
-  const [dbConn, setDbConn] = useState<duckdb.AsyncDuckDBConnection | null>(
-    null
-  );
+  const [dbConn, setDbConn] = useState<duckdb.AsyncDuckDBConnection | null>(null);
   const [spatialLoaded, setSpatialLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [pcdFileContents, setPcdFileContents] = useState<string[]>([]);
-  const [interactionMode, setInteractionMode] =
-    useState<InteractionMode>("draw");
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>("draw");
 
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [strokeWidth, setStrokeWidth] = useState(4);
@@ -228,8 +219,7 @@ export default function App() {
 
     if (spatialLoaded) {
       const wkt = String(toWKT(ptsPx));
-      const newId =
-        crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+      const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
 
       const insert = await dbConn.prepare(
         `INSERT INTO strokes(id, geom, color, width) VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?);`
@@ -238,24 +228,14 @@ export default function App() {
       await insert.close();
 
       if (simplifyOn) {
-        const upd = await dbConn.prepare(
-          `UPDATE strokes SET geom = ST_Simplify(geom, ?) WHERE id = ?;`
-        );
+        const upd = await dbConn.prepare(`UPDATE strokes SET geom = ST_Simplify(geom, ?) WHERE id = ?;`);
         await upd.query(Math.max(0, Math.min(strokeWidth * 0.3, 3)), newId);
         await upd.close();
       }
     } else {
-      const newId =
-        crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-      const insertJ = await dbConn.prepare(
-        `INSERT INTO strokes_json(id, coords, color, width) VALUES (?, ?, ?, ?);`
-      );
-      await insertJ.query(
-        newId,
-        JSON.stringify(ptsPx),
-        strokeColor,
-        strokeWidth
-      );
+      const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+      const insertJ = await dbConn.prepare(`INSERT INTO strokes_json(id, coords, color, width) VALUES (?, ?, ?, ?);`);
+      await insertJ.query(newId, JSON.stringify(ptsPx), strokeColor, strokeWidth);
       await insertJ.close();
     }
 
@@ -282,9 +262,7 @@ export default function App() {
           background: "#fff",
         }}
       >
-        <h1 style={{ fontSize: 16, fontWeight: 600 }}>
-          DuckDB Spatial × R3F — Line Draw & PCD Viewer
-        </h1>
+        <h1 style={{ fontSize: 16, fontWeight: 600 }}>DuckDB Spatial × R3F — Line Draw & PCD Viewer</h1>
         <div
           style={{
             marginLeft: "auto",
@@ -310,8 +288,7 @@ export default function App() {
               style={{
                 padding: "4px 8px",
                 fontSize: 12,
-                backgroundColor:
-                  interactionMode === "draw" ? "#007bff" : "#f8f9fa",
+                backgroundColor: interactionMode === "draw" ? "#007bff" : "#f8f9fa",
                 color: interactionMode === "draw" ? "white" : "#212529",
                 border: "1px solid #dee2e6",
                 borderRadius: 4,
@@ -325,8 +302,7 @@ export default function App() {
               style={{
                 padding: "4px 8px",
                 fontSize: 12,
-                backgroundColor:
-                  interactionMode === "pan" ? "#007bff" : "#f8f9fa",
+                backgroundColor: interactionMode === "pan" ? "#007bff" : "#f8f9fa",
                 color: interactionMode === "pan" ? "white" : "#212529",
                 border: "1px solid #dee2e6",
                 borderRadius: 4,
@@ -361,12 +337,7 @@ export default function App() {
               gap: 4,
             }}
           >
-            <input
-              type="checkbox"
-              checked={simplifyOn}
-              onChange={(e) => setSimplifyOn(e.target.checked)}
-            />{" "}
-            Simplify
+            <input type="checkbox" checked={simplifyOn} onChange={(e) => setSimplifyOn(e.target.checked)} /> Simplify
           </label>
           <button onClick={handleUndo}>Undo</button>
           <button onClick={handleRefresh}>Refresh</button>
@@ -411,10 +382,7 @@ export default function App() {
                   {pcdFileContents.length} cloud
                   {pcdFileContents.length > 1 ? "s" : ""} loaded
                 </span>
-                <button
-                  onClick={handleClearPointClouds}
-                  style={{ color: "#c00", fontSize: 12 }}
-                >
+                <button onClick={handleClearPointClouds} style={{ color: "#c00", fontSize: 12 }}>
                   Clear Clouds
                 </button>
               </>
@@ -428,19 +396,11 @@ export default function App() {
         <div style={{ position: "relative", width: "100%", height: "100%" }}>
           {/* Canvas は absolute で inset:0（%高さ連鎖を断つ） */}
           <div style={{ position: "absolute", inset: 0 }}>
-            <Canvas
-              orthographic
-              camera={{ position: [0, 0, 100], zoom: 1 }}
-              style={{ width: "100%", height: "100%" }}
-            >
+            <Canvas orthographic camera={{ position: [0, 0, 100], zoom: 1 }} style={{ width: "100%", height: "100%" }}>
               <color attach="background" args={["#ffffff"]} />
               <ambientLight intensity={0.5} />
               {/* 画面操作 - OrbitControls behavior changes based on interaction mode */}
-              <OrbitControls
-                makeDefault
-                enableRotate={false}
-                enabled={interactionMode === "pan"}
-              />
+              <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
 
               <Scene pcdFileContents={pcdFileContents} strokes={strokes} />
               <DrawingSurface
@@ -480,8 +440,7 @@ export default function App() {
                 textAlign: "center",
               }}
             >
-              spatial
-              拡張のロードに失敗しました。環境によっては利用できない場合があります。
+              spatial 拡張のロードに失敗しました。環境によっては利用できない場合があります。
               <br />
               その場合、保存・再描画が動作しません（コンソールのログをご確認ください）。
             </div>
@@ -501,24 +460,15 @@ export default function App() {
         </div>
       </main>
 
-      <footer
-        style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}
-      >
-        Draw モード: 左ドラッグで描画 | Pan モード:
-        ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear
-        はヘッダーから
+      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
+        Draw モード: 左ドラッグで描画 | Pan モード: ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 |
+        Undo・Clear はヘッダーから
       </footer>
     </div>
   );
 }
 
-function Scene({
-  strokes,
-  pcdFileContents,
-}: {
-  strokes: Stroke[];
-  pcdFileContents: string[];
-}) {
+function Scene({ strokes, pcdFileContents }: { strokes: Stroke[]; pcdFileContents: string[] }) {
   const { size, viewport } = useThree();
 
   const strokeLines = useMemo(() => {
@@ -539,19 +489,10 @@ function Scene({
   return (
     <group>
       {strokeLines.map((s) => (
-        <Line
-          key={s.id}
-          points={s.points}
-          color={s.color}
-          lineWidth={s.width}
-        />
+        <Line key={s.id} points={s.points} color={s.color} lineWidth={s.width} />
       ))}
       {pcdFileContents.map((content, index) => (
-        <PCDFromFile
-          key={`pcd-${index}`}
-          fileContent={content}
-          pointSize={0.5}
-        />
+        <PCDFromFile key={`pcd-${index}`} fileContent={content} pointSize={0.5} />
       ))}
     </group>
   );
@@ -570,9 +511,7 @@ function DrawingSurface({
 }) {
   const { size, viewport } = useThree();
   const [drawing, setDrawing] = useState(false);
-  const [previewWorld, setPreviewWorld] = useState<[number, number, number][]>(
-    []
-  );
+  const [previewWorld, setPreviewWorld] = useState<[number, number, number][]>([]);
   const ptsPxRef = useRef<[number, number][]>([]);
 
   const worldToPx = (wx: number, wy: number): [number, number] => {
@@ -584,15 +523,9 @@ function DrawingSurface({
   // 近すぎる点をスキップして無駄な頂点を減らす
   const MIN_DIST = 1.5; // px
 
-  const planeArgs = useMemo<[number, number]>(
-    () => [viewport.width, viewport.height],
-    [viewport]
-  );
+  const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
 
-  const onPointerDown = (e: {
-    stopPropagation: () => void;
-    point: { x: number; y: number; z: number };
-  }) => {
+  const onPointerDown = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
     if (!enabled) return;
     e.stopPropagation();
     setDrawing(true);
@@ -623,15 +556,8 @@ function DrawingSurface({
 
   return (
     <group>
-      {enabled && previewWorld.length >= 2 && (
-        <Line points={previewWorld} color={color} lineWidth={width} />
-      )}
-      <mesh
-        position={[0, 0, 0]}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-      >
+      {enabled && previewWorld.length >= 2 && <Line points={previewWorld} color={color} lineWidth={width} />}
+      <mesh position={[0, 0, 0]} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         <planeGeometry args={planeArgs} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>

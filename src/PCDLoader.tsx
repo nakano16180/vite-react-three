@@ -7,10 +7,7 @@ interface PCDLoaderComponentProps {
   pointSize?: number;
 }
 
-export function PCDLoaderComponent({
-  url,
-  pointSize = 0.5,
-}: PCDLoaderComponentProps) {
+export function PCDLoaderComponent({ url, pointSize = 0.5 }: PCDLoaderComponentProps) {
   const [points, setPoints] = useState<THREE.Points | null>(null);
 
   useEffect(() => {
@@ -38,13 +35,7 @@ export function PCDLoaderComponent({
 }
 
 // Alternative approach using useLoader hook for file content
-export function PCDFromFile({
-  fileContent,
-  pointSize = 0.5,
-}: {
-  fileContent: string;
-  pointSize?: number;
-}) {
+export function PCDFromFile({ fileContent, pointSize = 0.5 }: { fileContent: string; pointSize?: number }) {
   const [points, setPoints] = useState<THREE.Points | null>(null);
 
   useEffect(() => {
