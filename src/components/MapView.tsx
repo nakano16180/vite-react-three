@@ -6,11 +6,16 @@ interface MapViewProps {
   visible: boolean;
 }
 
+// Default map center: Tokyo, Japan
+const DEFAULT_LONGITUDE = 139.7671;
+const DEFAULT_LATITUDE = 35.6812;
+const DEFAULT_ZOOM = 12;
+
 export function MapView({ visible }: MapViewProps) {
   const [viewState, setViewState] = useState({
-    longitude: 139.7671,
-    latitude: 35.6812,
-    zoom: 12,
+    longitude: DEFAULT_LONGITUDE,
+    latitude: DEFAULT_LATITUDE,
+    zoom: DEFAULT_ZOOM,
   });
 
   if (!visible) return null;
