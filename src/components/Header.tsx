@@ -17,6 +17,8 @@ interface HeaderProps {
   handleFileLoad: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleClearPointClouds: () => void;
   pcdFileContents: string[];
+  showMap: boolean;
+  setShowMap: (show: boolean) => void;
 }
 
 export function Header({
@@ -34,6 +36,8 @@ export function Header({
   handleFileLoad,
   handleClearPointClouds,
   pcdFileContents,
+  showMap,
+  setShowMap,
 }: HeaderProps) {
   return (
     <header
@@ -94,6 +98,33 @@ export function Header({
             }}
           >
             Pan
+          </button>
+        </div>
+
+        {/* Map Toggle */}
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            alignItems: "center",
+            marginRight: 16,
+            borderRight: "1px solid #e5e5e5",
+            paddingRight: 16,
+          }}
+        >
+          <button
+            onClick={() => setShowMap(!showMap)}
+            style={{
+              padding: "4px 8px",
+              fontSize: 12,
+              backgroundColor: showMap ? "#28a745" : "#f8f9fa",
+              color: showMap ? "white" : "#212529",
+              border: "1px solid #dee2e6",
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            {showMap ? "Hide Map" : "Show Map"}
           </button>
         </div>
 

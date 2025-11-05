@@ -6,6 +6,7 @@ import { bundle } from "./dbBundles";
 import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
+import { MapView } from "./components/MapView";
 
 // DuckDB への保存は px 座標（画面座標）で行います
 const toWKT = (ptsPx: [number, number][]) => {
@@ -43,6 +44,7 @@ export default function App() {
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [simplifyOn, setSimplifyOn] = useState(true);
+  const [showMap, setShowMap] = useState(false);
 
   // DuckDB 初期化
   useEffect(() => {
@@ -269,6 +271,8 @@ export default function App() {
         handleFileLoad={handleFileLoad}
         handleClearPointClouds={handleClearPointClouds}
         pcdFileContents={pcdFileContents}
+        showMap={showMap}
+        setShowMap={setShowMap}
       />
 
       <main style={{ flex: 1, padding: 12, minHeight: 0 }}>
@@ -276,20 +280,28 @@ export default function App() {
         <div style={{ position: "relative", width: "100%", height: "100%" }}>
           {/* Canvas は absolute で inset:0（%高さ連鎖を断つ） */}
           <div style={{ position: "absolute", inset: 0 }}>
-            <Canvas orthographic camera={{ position: [0, 0, 100], zoom: 1 }} style={{ width: "100%", height: "100%" }}>
-              <color attach="background" args={["#ffffff"]} />
-              <ambientLight intensity={0.5} />
-              {/* 画面操作 - OrbitControls behavior changes based on interaction mode */}
-              <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
+            {showMap ? (
+              <MapView visible={showMap} />
+            ) : (
+              <Canvas
+                orthographic
+                camera={{ position: [0, 0, 100], zoom: 1 }}
+                style={{ width: "100%", height: "100%" }}
+              >
+                <color attach="background" args={["#ffffff"]} />
+                <ambientLight intensity={0.5} />
+                {/* 画面操作 - OrbitControls behavior changes based on interaction mode */}
+                <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
 
-              <Scene pcdFileContents={pcdFileContents} strokes={strokes} />
-              <DrawingSurface
-                onFinish={persistStroke}
-                color={strokeColor}
-                width={strokeWidth}
-                enabled={interactionMode === "draw"}
-              />
-            </Canvas>
+                <Scene pcdFileContents={pcdFileContents} strokes={strokes} />
+                <DrawingSurface
+                  onFinish={persistStroke}
+                  color={strokeColor}
+                  width={strokeWidth}
+                  enabled={interactionMode === "draw"}
+                />
+              </Canvas>
+            )}
           </div>
 
           {/* ローディング/警告オーバーレイ */}

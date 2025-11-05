@@ -17,12 +17,15 @@
     "@react-three/drei": "^10.7.4",
     "@react-three/fiber": "^9.3.0",
     "@types/three": "^0.180.0",
+    "maplibre-gl": "^5.11.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-map-gl": "^8.1.0",
     "three": "^0.180.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
+    "@types/maplibre-gl": "^1.13.2",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
