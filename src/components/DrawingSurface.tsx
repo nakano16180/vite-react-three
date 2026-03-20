@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useThree } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 
@@ -11,9 +11,9 @@ interface DrawingSurfaceProps {
 
 export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfaceProps) {
   const { size, viewport } = useThree();
-  const [drawing, setDrawing] = useState(false);
-  const [previewWorld, setPreviewWorld] = useState<[number, number, number][]>([]);
-  const ptsPxRef = useRef<[number, number][]>([]);
+  const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
+  const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
+  const currentPtsPxRef = useRef<[number, number][]>([]);
 
   const worldToPx = (wx: number, wy: number): [number, number] => {
     const x = ((wx + viewport.width / 2) / viewport.width) * size.width;
@@ -21,44 +21,67 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
     return [x, y];
   };
 
-  // 近すぎる点をスキップして無駄な頂点を減らす
-  const MIN_DIST = 1.5; // px
-
   const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
 
-  const onPointerDown = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
+  // Escapeキーでストロークを確定・保存
+  useEffect(() => {
+    if (!enabled) return;
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const ptsPx = currentPtsPxRef.current.slice();
+      currentPtsPxRef.current = [];
+      setCurrentPtsWorld([]);
+      setHoverWorld(null);
+      if (ptsPx.length >= 2) {
+        await onFinish(ptsPx);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [enabled, onFinish]);
+
+  const onClick = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
     if (!enabled) return;
     e.stopPropagation();
-    setDrawing(true);
     const p = e.point;
-    setPreviewWorld([[p.x, p.y, 0]]);
-    ptsPxRef.current = [worldToPx(p.x, p.y)];
+    currentPtsPxRef.current = [...currentPtsPxRef.current, worldToPx(p.x, p.y)];
+    setCurrentPtsWorld((prev) => [...prev, [p.x, p.y, 0]]);
   };
 
   const onPointerMove = (e: { point: { x: number; y: number; z: number } }) => {
-    if (!drawing || !enabled) return;
-    const p = e.point;
-    const [x, y] = worldToPx(p.x, p.y);
-    const last = ptsPxRef.current[ptsPxRef.current.length - 1];
-    if (!last || Math.hypot(x - last[0], y - last[1]) >= MIN_DIST) {
-      ptsPxRef.current.push([x, y]);
-      setPreviewWorld((prev) => [...prev, [p.x, p.y, 0]]);
-    }
+    if (!enabled) return;
+    setHoverWorld([e.point.x, e.point.y, 0]);
   };
 
-  const onPointerUp = async () => {
-    if (!drawing || !enabled) return;
-    setDrawing(false);
-    const ptsPx = ptsPxRef.current.slice();
-    ptsPxRef.current = [];
-    setPreviewWorld([]);
-    await onFinish(ptsPx);
-  };
+  // プレビュー線：最後の確定点 → 現在のカーソル位置
+  const lastPt = currentPtsWorld[currentPtsWorld.length - 1];
+  const previewLine = enabled && lastPt && hoverWorld ? [lastPt, hoverWorld] : null;
+
+  // 最後の点のハイライト用サイズ
+  const dotRadius = Math.max(0.01, (width / Math.max(size.width, size.height)) * viewport.width * 0.8);
 
   return (
     <group>
-      {enabled && previewWorld.length >= 2 && <Line points={previewWorld} color={color} lineWidth={width} />}
-      <mesh position={[0, 0, 0]} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      {/* 確定済みの線分 */}
+      {enabled && currentPtsWorld.length >= 2 && <Line points={currentPtsWorld} color={color} lineWidth={width} />}
+      {/* プレビュー線（半透明） */}
+      {previewLine && (
+        <Line
+          points={previewLine as [number, number, number][]}
+          color={color}
+          lineWidth={width}
+          transparent
+          opacity={0.4}
+        />
+      )}
+      {/* 最後の点のハイライト */}
+      {enabled && lastPt && (
+        <mesh position={lastPt}>
+          <circleGeometry args={[dotRadius, 16]} />
+          <meshBasicMaterial color={color} />
+        </mesh>
+      )}
+      <mesh position={[0, 0, -0.001]} onClick={onClick} onPointerMove={onPointerMove}>
         <planeGeometry args={planeArgs} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
