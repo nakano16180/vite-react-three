@@ -7,6 +7,7 @@ import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
 import { MapView } from "./components/MapView";
+import { StrokeEditor } from "./components/StrokeEditor";
 
 // DuckDB への保存は px 座標（画面座標）で行います
 const toWKT = (ptsPx: [number, number][]) => {
@@ -31,7 +32,7 @@ interface Stroke {
   ptsPx: [number, number][]; // DB は px 座標で保持
 }
 
-type InteractionMode = "draw" | "pan";
+type InteractionMode = "draw" | "pan" | "edit";
 
 export default function App() {
   const [dbConn, setDbConn] = useState<duckdb.AsyncDuckDBConnection | null>(null);
@@ -217,6 +218,21 @@ export default function App() {
     setPcdFileContents([]);
   };
 
+  // 点を動かした後にストロークを更新
+  const updateStroke = async (strokeId: string, newPtsPx: [number, number][]) => {
+    if (!dbConn || newPtsPx.length < 2) return;
+    if (spatialLoaded) {
+      const wkt = String(toWKT(newPtsPx));
+      const upd = await dbConn.prepare(`UPDATE strokes SET geom = ST_GeomFromText(CAST(? AS VARCHAR)) WHERE id = ?;`);
+      await upd.query(wkt, strokeId);
+      await upd.close();
+    }
+    const updJ = await dbConn.prepare(`UPDATE strokes_json SET coords = ? WHERE id = ?;`);
+    await updJ.query(JSON.stringify(newPtsPx), strokeId);
+    await updJ.close();
+    await reloadFromDB();
+  };
+
   // ドラッグ終了時に DB に保存
   const persistStroke = async (ptsPx: [number, number][]) => {
     if (!dbConn || ptsPx.length < 2) return;
@@ -293,7 +309,8 @@ export default function App() {
                 {/* 画面操作 - OrbitControls behavior changes based on interaction mode */}
                 <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
 
-                <Scene pcdFileContents={pcdFileContents} strokes={strokes} />
+                <Scene pcdFileContents={pcdFileContents} strokes={strokes} hideStrokes={interactionMode === "edit"} />
+                <StrokeEditor strokes={strokes} onUpdateStroke={updateStroke} enabled={interactionMode === "edit"} />
                 <DrawingSurface
                   onFinish={persistStroke}
                   color={strokeColor}
@@ -353,8 +370,8 @@ export default function App() {
       </main>
 
       <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
-        Draw モード: 左ドラッグで描画 | Pan モード: ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 |
-        Undo・Clear はヘッダーから
+        Draw モード: クリックで点を追加・Escで確定 | Edit モード: 点をドラッグで移動 | Pan モード:
+        ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear はヘッダーから
       </footer>
     </div>
   );
