@@ -13,9 +13,10 @@ interface Stroke {
 interface SceneProps {
   strokes: Stroke[];
   pcdFileContents: string[];
+  hideStrokes?: boolean;
 }
 
-export function Scene({ strokes, pcdFileContents }: SceneProps) {
+export function Scene({ strokes, pcdFileContents, hideStrokes = false }: SceneProps) {
   const { size, viewport } = useThree();
 
   const strokeLines = useMemo(() => {
@@ -35,9 +36,8 @@ export function Scene({ strokes, pcdFileContents }: SceneProps) {
 
   return (
     <group>
-      {strokeLines.map((s) => (
-        <Line key={s.id} points={s.points} color={s.color} lineWidth={s.width} />
-      ))}
+      {!hideStrokes &&
+        strokeLines.map((s) => <Line key={s.id} points={s.points} color={s.color} lineWidth={s.width} />)}
       {pcdFileContents.map((content, index) => (
         <PCDFromFile key={`pcd-${index}`} fileContent={content} pointSize={0.5} />
       ))}
