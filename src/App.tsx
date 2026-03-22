@@ -37,6 +37,7 @@ type InteractionMode = "draw" | "pan" | "edit";
 export default function App() {
   const [dbConn, setDbConn] = useState<duckdb.AsyncDuckDBConnection | null>(null);
   const [spatialLoaded, setSpatialLoaded] = useState(false);
+  const [opfsLoaded, setOpfsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [pcdFileContents, setPcdFileContents] = useState<string[]>([]);
@@ -57,6 +58,19 @@ export default function App() {
         const logger = new duckdb.ConsoleLogger();
         const _db = new duckdb.AsyncDuckDB(logger, worker);
         await _db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+
+        // OPFSを使って永続化を試みる
+        let opfsOK = false;
+        try {
+          await _db.open({
+            path: "opfs://vite-react-three.duckdb",
+            accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
+          });
+          opfsOK = true;
+        } catch (e) {
+          console.warn("OPFS not available, using in-memory database:", e);
+        }
+
         const _conn = await _db.connect();
 
         let spatialOK = false;
@@ -95,7 +109,10 @@ export default function App() {
         `);
         }
 
-        if (!cancelled) setDbConn(_conn);
+        if (!cancelled) {
+          setDbConn(_conn);
+          setOpfsLoaded(opfsOK);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -370,6 +387,11 @@ export default function App() {
       </main>
 
       <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
+        {opfsLoaded ? (
+          <span style={{ color: "#16a34a", marginRight: 8 }}>💾 データ永続化中 (OPFS)</span>
+        ) : (
+          <span style={{ color: "#b45309", marginRight: 8 }}>⚠️ メモリのみ（リロードでリセット）</span>
+        )}
         Draw モード: クリックで点を追加・Escで確定 | Edit モード: 点をドラッグで移動 | Pan モード:
         ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear はヘッダーから
       </footer>
