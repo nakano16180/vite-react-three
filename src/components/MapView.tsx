@@ -26,7 +26,7 @@ export function MapView({ visible }: MapViewProps) {
         {...viewState}
         onMove={(evt) => setViewState(evt.viewState)}
         style={{ width: "100%", height: "100%" }}
-        mapStyle="https://demotiles.maplibre.org/style.json"
+        mapStyle="https://tile.openstreetmap.jp/styles/osm-bright-ja/style.json"
       />
     </div>
   );
