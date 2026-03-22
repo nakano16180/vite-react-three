@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "2dc239c8bf11",
+  "session_id": "ee8853a7-2af9-474a-a631-9cfe02feb615",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-22T01:00:27.781821949Z",
+  "branch": "feature/persist_db_with_opfs",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/App.tsx",
+    "vite.config.ts"
+  ],
+  "agent": "Copilot CLI",
+  "model": "claude-sonnet-4.6",
+  "turn_id": "861735f9081c",
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 10548,
+    "api_call_count": 19
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-22T01:00:27.653163188Z",
+    "agent_lines": 29,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 29,
+    "agent_percentage": 100
+  }
+}

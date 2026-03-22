@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "2dc239c8bf11",
+  "strategy": "manual-commit",
+  "branch": "feature/persist_db_with_opfs",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/App.tsx",
+    "vite.config.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/2d/c239c8bf11/0/metadata.json",
+      "transcript": "/2d/c239c8bf11/0/full.jsonl",
+      "content_hash": "/2d/c239c8bf11/0/content_hash.txt",
+      "prompt": "/2d/c239c8bf11/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 10548,
+    "api_call_count": 19
+  }
+}
