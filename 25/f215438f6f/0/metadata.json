@@ -1,0 +1,19 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "25f215438f6f",
+  "session_id": "ee8853a7-2af9-474a-a631-9cfe02feb615",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-29T11:13:21.468847903Z",
+  "branch": "feature/opfs-github-pages",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Copilot CLI",
+  "turn_id": "134d1735908a",
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 14926,
+    "api_call_count": 38
+  }
+}
