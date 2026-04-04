@@ -122,6 +122,15 @@ export default function App() {
     };
   }, []);
 
+  // OPFSに確実に書き込むためチェックポイントを実行
+  const checkpoint = async (conn: duckdb.AsyncDuckDBConnection) => {
+    try {
+      await conn.query(`CHECKPOINT;`);
+    } catch (e) {
+      console.warn("CHECKPOINT failed:", e);
+    }
+  };
+
   // DB → strokes を読み直し
   const reloadFromDB = async () => {
     if (!dbConn) return;
@@ -195,6 +204,7 @@ export default function App() {
       `);
     }
     await reloadFromDB();
+    await checkpoint(dbConn);
   };
 
   const handleClear = async () => {
@@ -204,6 +214,7 @@ export default function App() {
     }
     await dbConn.query(`DELETE FROM strokes_json;`);
     await reloadFromDB();
+    await checkpoint(dbConn);
   };
 
   const handleRefresh = async () => reloadFromDB();
@@ -248,6 +259,7 @@ export default function App() {
     await updJ.query(JSON.stringify(newPtsPx), strokeId);
     await updJ.close();
     await reloadFromDB();
+    await checkpoint(dbConn);
   };
 
   // ドラッグ終了時に DB に保存
@@ -277,6 +289,7 @@ export default function App() {
     }
 
     await reloadFromDB();
+    await checkpoint(dbConn);
   };
 
   return (
