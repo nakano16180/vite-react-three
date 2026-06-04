@@ -10,26 +10,70 @@ import { MapView } from "./components/MapView";
 import { StrokeEditor } from "./components/StrokeEditor";
 
 // DuckDB への保存は px 座標（画面座標）で行います
-const toWKT = (ptsPx: [number, number][]) => {
+type GeometryType = "line" | "polygon";
+
+const toLineWKT = (ptsPx: [number, number][]) => {
   // 非数値/NaN を除外して WKT を生成
   const filtered = ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
   const body = filtered.map(([x, y]) => `${x} ${y}`).join(", ");
   return `LINESTRING(${body})`;
 };
 
-const parseLineStringFromGeoJSON = (gj: { type?: string; coordinates?: [number, number][] }): [number, number][] => {
-  if (!gj || gj.type !== "LineString" || !gj.coordinates) return [];
-  return gj.coordinates.map((c: [number, number]) => [c[0], c[1]]);
+const pointsEqual = ([ax, ay]: [number, number], [bx, by]: [number, number]) => ax === bx && ay === by;
+
+const toPolygonWKT = (ptsPx: [number, number][]) => {
+  const filtered = ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+  const closed =
+    filtered.length > 0 && !pointsEqual(filtered[0], filtered[filtered.length - 1])
+      ? [...filtered, filtered[0]]
+      : filtered;
+  const body = closed.map(([x, y]) => `${x} ${y}`).join(", ");
+  return `POLYGON((${body}))`;
+};
+
+const toWKT = (ptsPx: [number, number][], type: GeometryType) =>
+  type === "polygon" ? toPolygonWKT(ptsPx) : toLineWKT(ptsPx);
+
+const parseGeometryFromGeoJSON = (
+  gj: { type?: string; coordinates?: [number, number][] | [number, number][][] },
+  type: GeometryType
+): [number, number][] => {
+  let coordinates: [number, number][];
+  if (type === "polygon") {
+    if (gj.type !== "Polygon" || !gj.coordinates) return [];
+    coordinates = gj.coordinates[0] as [number, number][];
+  } else {
+    if (gj.type !== "LineString" || !gj.coordinates) return [];
+    coordinates = gj.coordinates as [number, number][];
+  }
+  const points = coordinates.map((c) => [c[0], c[1]] as [number, number]);
+  if (type === "polygon" && points.length > 1 && pointsEqual(points[0], points[points.length - 1])) {
+    points.pop();
+  }
+  return points;
 };
 
 const toStr = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
 const toNum = (v: unknown): number => (typeof v === "number" ? v : Number(v));
+const toGeometryType = (v: unknown): GeometryType => (toStr(v) === "polygon" ? "polygon" : "line");
+
+const polygonArea = (ptsPx: [number, number][]) => {
+  let area = 0;
+  for (let i = 0; i < ptsPx.length; i++) {
+    const [x1, y1] = ptsPx[i];
+    const [x2, y2] = ptsPx[(i + 1) % ptsPx.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area) / 2;
+};
 
 interface Stroke {
   id: string;
   color: string;
   width: number; // px 単位
   ptsPx: [number, number][]; // DB は px 座標で保持
+  geomType: GeometryType;
+  area?: number;
 }
 
 type InteractionMode = "draw" | "pan" | "edit";
@@ -91,9 +135,11 @@ export default function App() {
             coords JSON,
             color VARCHAR,
             width DOUBLE,
+            geom_type VARCHAR DEFAULT 'line',
             created_at TIMESTAMP DEFAULT now()
           );
         `);
+        await _conn.query(`ALTER TABLE strokes_json ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';`);
 
         // spatial が使える環境では GEOMETRY テーブルも作成
         // id は TEXT にして、ブラウザ側で UUID を付与（uuid 拡張不要）
@@ -104,9 +150,11 @@ export default function App() {
             geom  GEOMETRY,
             color VARCHAR,
             width DOUBLE,
+            geom_type VARCHAR DEFAULT 'line',
             created_at TIMESTAMP DEFAULT now()
           );
         `);
+          await _conn.query(`ALTER TABLE strokes ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';`);
         }
 
         if (!cancelled) {
@@ -138,7 +186,8 @@ export default function App() {
 
     if (spatialLoaded) {
       const res = await dbConn.query(`
-        SELECT id, color, width, ST_AsGeoJSON(geom) AS gj
+        SELECT id, color, width, geom_type, ST_AsGeoJSON(geom) AS gj,
+               CASE WHEN geom_type = 'polygon' THEN ST_Area(geom) END AS area
         FROM strokes
         ORDER BY created_at ASC;
       `);
@@ -149,14 +198,23 @@ export default function App() {
         const color = toStr(obj["color"]) || "#222";
         const widthRaw = toNum(obj["width"]);
         const width = Number.isFinite(widthRaw) ? widthRaw : 3;
+        const geomType = toGeometryType(obj["geom_type"]);
+        const areaRaw = toNum(obj["area"]);
         const gj = JSON.parse(toStr(obj["gj"]));
-        list.push({ id, color, width, ptsPx: parseLineStringFromGeoJSON(gj) });
+        list.push({
+          id,
+          color,
+          width,
+          geomType,
+          area: Number.isFinite(areaRaw) ? areaRaw : undefined,
+          ptsPx: parseGeometryFromGeoJSON(gj, geomType),
+        });
       }
     }
 
     // JSON 方式（フォールバック/併用）
     const resJ = await dbConn.query(`
-      SELECT id, color, width, coords
+      SELECT id, color, width, coords, geom_type
       FROM strokes_json
       ORDER BY created_at ASC;
     `);
@@ -167,6 +225,7 @@ export default function App() {
       const color = toStr(obj["color"]) || "#222";
       const widthRaw = toNum(obj["width"]);
       const width = Number.isFinite(widthRaw) ? widthRaw : 3;
+      const geomType = toGeometryType(obj["geom_type"]);
       const coordsStr = toStr(obj["coords"]);
       let pts: [number, number][] = [];
       try {
@@ -175,7 +234,14 @@ export default function App() {
       } catch {
         // Ignore parsing errors, use empty array
       }
-      list.push({ id, color, width, ptsPx: pts });
+      list.push({
+        id,
+        color,
+        width,
+        geomType,
+        area: geomType === "polygon" ? polygonArea(pts) : undefined,
+        ptsPx: pts,
+      });
     }
 
     setStrokes(list);
@@ -250,7 +316,9 @@ export default function App() {
   const updateStroke = async (strokeId: string, newPtsPx: [number, number][]) => {
     if (!dbConn || newPtsPx.length < 2) return;
     if (spatialLoaded) {
-      const wkt = String(toWKT(newPtsPx));
+      const stroke = strokes.find(({ id }) => id === strokeId);
+      const geomType = stroke?.geomType ?? "line";
+      const wkt = String(toWKT(newPtsPx, geomType));
       const upd = await dbConn.prepare(`UPDATE strokes SET geom = ST_GeomFromText(CAST(? AS VARCHAR)) WHERE id = ?;`);
       await upd.query(wkt, strokeId);
       await upd.close();
@@ -263,17 +331,17 @@ export default function App() {
   };
 
   // ドラッグ終了時に DB に保存
-  const persistStroke = async (ptsPx: [number, number][]) => {
-    if (!dbConn || ptsPx.length < 2) return;
+  const persistStroke = async (ptsPx: [number, number][], geomType: GeometryType) => {
+    if (!dbConn || ptsPx.length < (geomType === "polygon" ? 3 : 2)) return;
 
     if (spatialLoaded) {
-      const wkt = String(toWKT(ptsPx));
+      const wkt = String(toWKT(ptsPx, geomType));
       const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
 
       const insert = await dbConn.prepare(
-        `INSERT INTO strokes(id, geom, color, width) VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?);`
+        `INSERT INTO strokes(id, geom, color, width, geom_type) VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?, ?);`
       );
-      await insert.query(newId, wkt, strokeColor, strokeWidth);
+      await insert.query(newId, wkt, strokeColor, strokeWidth, geomType);
       await insert.close();
 
       if (simplifyOn) {
@@ -283,8 +351,10 @@ export default function App() {
       }
     } else {
       const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-      const insertJ = await dbConn.prepare(`INSERT INTO strokes_json(id, coords, color, width) VALUES (?, ?, ?, ?);`);
-      await insertJ.query(newId, JSON.stringify(ptsPx), strokeColor, strokeWidth);
+      const insertJ = await dbConn.prepare(
+        `INSERT INTO strokes_json(id, coords, color, width, geom_type) VALUES (?, ?, ?, ?, ?);`
+      );
+      await insertJ.query(newId, JSON.stringify(ptsPx), strokeColor, strokeWidth, geomType);
       await insertJ.close();
     }
 
@@ -405,7 +475,7 @@ export default function App() {
         ) : (
           <span style={{ color: "#b45309", marginRight: 8 }}>⚠️ メモリのみ（リロードでリセット）</span>
         )}
-        Draw モード: クリックで点を追加・Escで確定 | Edit モード: 点をドラッグで移動 | Pan モード:
+        Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Edit モード: 点をドラッグで移動 | Pan モード:
         ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear はヘッダーから
       </footer>
     </div>

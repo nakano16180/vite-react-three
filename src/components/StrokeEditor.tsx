@@ -7,6 +7,8 @@ interface Stroke {
   color: string;
   width: number;
   ptsPx: [number, number][];
+  geomType: "line" | "polygon";
+  area?: number;
 }
 
 interface StrokeEditorProps {
@@ -129,7 +131,8 @@ export function StrokeEditor({ strokes, onUpdateStroke, enabled }: StrokeEditorP
           .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
           .map(([x, y]) => pxToWorld(x, y));
         if (points.length < 2) return null;
-        return <Line key={s.id} points={points} color={s.color} lineWidth={s.width} />;
+        const displayPoints = s.geomType === "polygon" ? [...points, points[0]] : points;
+        return <Line key={s.id} points={displayPoints} color={s.color} lineWidth={s.width} />;
       })}
 
       {/* 各点のハンドル（外枠 + 塗り） */}
