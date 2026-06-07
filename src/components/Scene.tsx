@@ -3,6 +3,7 @@ import { useThree } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
 import { PCDFromFile } from "./PCDLoader";
+import { getCentroid } from "../lib/geometry";
 
 interface Stroke {
   id: string;
@@ -10,16 +11,19 @@ interface Stroke {
   width: number;
   ptsPx: [number, number][];
   geomType: "line" | "polygon";
+  length?: number;
   area?: number;
+  perimeter?: number;
 }
 
 interface SceneProps {
   strokes: Stroke[];
   pcdFileContents: string[];
   hideStrokes?: boolean;
+  showMeasurements?: boolean;
 }
 
-export function Scene({ strokes, pcdFileContents, hideStrokes = false }: SceneProps) {
+export function Scene({ strokes, pcdFileContents, hideStrokes = false, showMeasurements = false }: SceneProps) {
   const { size, viewport } = useThree();
 
   const renderedStrokes = useMemo(() => {
@@ -33,18 +37,15 @@ export function Scene({ strokes, pcdFileContents, hideStrokes = false }: ScenePr
       const points = s.ptsPx.map(([x, y]) => pxToWorld(x, y));
       const isPolygon = s.geomType === "polygon" && points.length >= 3;
       const shape = isPolygon ? new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y))) : undefined;
-      const labelPosition = isPolygon
-        ? ([
-            points.reduce((sum, [x]) => sum + x, 0) / points.length,
-            points.reduce((sum, [, y]) => sum + y, 0) / points.length,
-            0.002,
-          ] as [number, number, number])
-        : undefined;
+      const centroidWorld = pxToWorld(...getCentroid(s.ptsPx));
+      const measurementPosition = isPolygon
+        ? ([centroidWorld[0], centroidWorld[1], 0.002] as [number, number, number])
+        : points[points.length - 1];
       return {
         ...s,
         points: isPolygon ? [...points, points[0]] : points,
         shape,
-        labelPosition,
+        measurementPosition,
       };
     });
   }, [strokes, size, viewport]);
@@ -61,8 +62,8 @@ export function Scene({ strokes, pcdFileContents, hideStrokes = false }: ScenePr
               </mesh>
             )}
             <Line points={s.points} color={s.color} lineWidth={s.width} />
-            {s.labelPosition && Number.isFinite(s.area) && (
-              <Html position={s.labelPosition} center>
+            {showMeasurements && s.measurementPosition && (
+              <Html position={s.measurementPosition} center>
                 <div
                   style={{
                     padding: "2px 5px",
@@ -72,9 +73,17 @@ export function Scene({ strokes, pcdFileContents, hideStrokes = false }: ScenePr
                     fontSize: 11,
                     whiteSpace: "nowrap",
                     pointerEvents: "none",
+                    textAlign: "left",
                   }}
                 >
-                  {s.area?.toFixed(1)} px²
+                  {s.geomType === "polygon" ? (
+                    <>
+                      {Number.isFinite(s.area) && <div>Area: {s.area?.toFixed(1)} px²</div>}
+                      {Number.isFinite(s.perimeter) && <div>Perimeter: {s.perimeter?.toFixed(1)} px</div>}
+                    </>
+                  ) : (
+                    Number.isFinite(s.length) && <div>Length: {s.length?.toFixed(1)} px</div>
+                  )}
                 </div>
               </Html>
             )}

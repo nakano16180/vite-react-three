@@ -1,6 +1,6 @@
 import React from "react";
 
-type InteractionMode = "draw" | "pan" | "edit";
+type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
 interface HeaderProps {
   interactionMode: InteractionMode;
@@ -112,6 +112,20 @@ export function Header({
             }}
           >
             Edit
+          </button>
+          <button
+            onClick={() => setInteractionMode("measure")}
+            style={{
+              padding: "4px 8px",
+              fontSize: 12,
+              backgroundColor: interactionMode === "measure" ? "#0f766e" : "#f8f9fa",
+              color: interactionMode === "measure" ? "white" : "#212529",
+              border: "1px solid #dee2e6",
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            Measure
           </button>
         </div>
 

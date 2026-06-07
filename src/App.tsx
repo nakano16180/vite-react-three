@@ -8,20 +8,19 @@ import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
 import { MapView } from "./components/MapView";
 import { StrokeEditor } from "./components/StrokeEditor";
+import { getPolygonArea, getPolygonPerimeter, getPolylineLength, pointsEqual, type Point2D } from "./lib/geometry";
 
 // DuckDB への保存は px 座標（画面座標）で行います
 type GeometryType = "line" | "polygon";
 
-const toLineWKT = (ptsPx: [number, number][]) => {
+const toLineWKT = (ptsPx: Point2D[]) => {
   // 非数値/NaN を除外して WKT を生成
   const filtered = ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
   const body = filtered.map(([x, y]) => `${x} ${y}`).join(", ");
   return `LINESTRING(${body})`;
 };
 
-const pointsEqual = ([ax, ay]: [number, number], [bx, by]: [number, number]) => ax === bx && ay === by;
-
-const toPolygonWKT = (ptsPx: [number, number][]) => {
+const toPolygonWKT = (ptsPx: Point2D[]) => {
   const filtered = ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
   const closed =
     filtered.length > 0 && !pointsEqual(filtered[0], filtered[filtered.length - 1])
@@ -31,22 +30,21 @@ const toPolygonWKT = (ptsPx: [number, number][]) => {
   return `POLYGON((${body}))`;
 };
 
-const toWKT = (ptsPx: [number, number][], type: GeometryType) =>
-  type === "polygon" ? toPolygonWKT(ptsPx) : toLineWKT(ptsPx);
+const toWKT = (ptsPx: Point2D[], type: GeometryType) => (type === "polygon" ? toPolygonWKT(ptsPx) : toLineWKT(ptsPx));
 
 const parseGeometryFromGeoJSON = (
   gj: { type?: string; coordinates?: [number, number][] | [number, number][][] },
   type: GeometryType
-): [number, number][] => {
-  let coordinates: [number, number][];
+): Point2D[] => {
+  let coordinates: Point2D[];
   if (type === "polygon") {
     if (gj.type !== "Polygon" || !gj.coordinates) return [];
-    coordinates = gj.coordinates[0] as [number, number][];
+    coordinates = gj.coordinates[0] as Point2D[];
   } else {
     if (gj.type !== "LineString" || !gj.coordinates) return [];
-    coordinates = gj.coordinates as [number, number][];
+    coordinates = gj.coordinates as Point2D[];
   }
-  const points = coordinates.map((c) => [c[0], c[1]] as [number, number]);
+  const points = coordinates.map((c) => [c[0], c[1]] as Point2D);
   if (type === "polygon" && points.length > 1 && pointsEqual(points[0], points[points.length - 1])) {
     points.pop();
   }
@@ -57,26 +55,18 @@ const toStr = (v: unknown): string => (typeof v === "string" ? v : v == null ? "
 const toNum = (v: unknown): number => (typeof v === "number" ? v : Number(v));
 const toGeometryType = (v: unknown): GeometryType => (toStr(v) === "polygon" ? "polygon" : "line");
 
-const polygonArea = (ptsPx: [number, number][]) => {
-  let area = 0;
-  for (let i = 0; i < ptsPx.length; i++) {
-    const [x1, y1] = ptsPx[i];
-    const [x2, y2] = ptsPx[(i + 1) % ptsPx.length];
-    area += x1 * y2 - x2 * y1;
-  }
-  return Math.abs(area) / 2;
-};
-
 interface Stroke {
   id: string;
   color: string;
   width: number; // px 単位
-  ptsPx: [number, number][]; // DB は px 座標で保持
+  ptsPx: Point2D[]; // DB は px 座標で保持
   geomType: GeometryType;
+  length?: number;
   area?: number;
+  perimeter?: number;
 }
 
-type InteractionMode = "draw" | "pan" | "edit";
+type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
 export default function App() {
   const [dbConn, setDbConn] = useState<duckdb.AsyncDuckDBConnection | null>(null);
@@ -187,6 +177,7 @@ export default function App() {
     if (spatialLoaded) {
       const res = await dbConn.query(`
         SELECT id, color, width, geom_type, ST_AsGeoJSON(geom) AS gj,
+               CASE WHEN geom_type = 'line' THEN ST_Length(geom) END AS length,
                CASE WHEN geom_type = 'polygon' THEN ST_Area(geom) END AS area
         FROM strokes
         ORDER BY created_at ASC;
@@ -199,15 +190,19 @@ export default function App() {
         const widthRaw = toNum(obj["width"]);
         const width = Number.isFinite(widthRaw) ? widthRaw : 3;
         const geomType = toGeometryType(obj["geom_type"]);
+        const lengthRaw = toNum(obj["length"]);
         const areaRaw = toNum(obj["area"]);
         const gj = JSON.parse(toStr(obj["gj"]));
+        const ptsPx = parseGeometryFromGeoJSON(gj, geomType);
         list.push({
           id,
           color,
           width,
           geomType,
-          area: Number.isFinite(areaRaw) ? areaRaw : undefined,
-          ptsPx: parseGeometryFromGeoJSON(gj, geomType),
+          length: Number.isFinite(lengthRaw) ? lengthRaw : getPolylineLength(ptsPx),
+          area: geomType === "polygon" ? (Number.isFinite(areaRaw) ? areaRaw : getPolygonArea(ptsPx)) : undefined,
+          perimeter: geomType === "polygon" ? getPolygonPerimeter(ptsPx) : undefined,
+          ptsPx,
         });
       }
     }
@@ -227,10 +222,10 @@ export default function App() {
       const width = Number.isFinite(widthRaw) ? widthRaw : 3;
       const geomType = toGeometryType(obj["geom_type"]);
       const coordsStr = toStr(obj["coords"]);
-      let pts: [number, number][] = [];
+      let pts: Point2D[] = [];
       try {
         const a = JSON.parse(coordsStr);
-        if (Array.isArray(a)) pts = a as [number, number][];
+        if (Array.isArray(a)) pts = a as Point2D[];
       } catch {
         // Ignore parsing errors, use empty array
       }
@@ -239,7 +234,9 @@ export default function App() {
         color,
         width,
         geomType,
-        area: geomType === "polygon" ? polygonArea(pts) : undefined,
+        length: getPolylineLength(pts),
+        area: geomType === "polygon" ? getPolygonArea(pts) : undefined,
+        perimeter: geomType === "polygon" ? getPolygonPerimeter(pts) : undefined,
         ptsPx: pts,
       });
     }
@@ -313,7 +310,7 @@ export default function App() {
   };
 
   // 点を動かした後にストロークを更新
-  const updateStroke = async (strokeId: string, newPtsPx: [number, number][]) => {
+  const updateStroke = async (strokeId: string, newPtsPx: Point2D[]) => {
     if (!dbConn || newPtsPx.length < 2) return;
     if (spatialLoaded) {
       const stroke = strokes.find(({ id }) => id === strokeId);
@@ -331,7 +328,7 @@ export default function App() {
   };
 
   // ドラッグ終了時に DB に保存
-  const persistStroke = async (ptsPx: [number, number][], geomType: GeometryType) => {
+  const persistStroke = async (ptsPx: Point2D[], geomType: GeometryType) => {
     if (!dbConn || ptsPx.length < (geomType === "polygon" ? 3 : 2)) return;
 
     if (spatialLoaded) {
@@ -409,7 +406,12 @@ export default function App() {
                 {/* 画面操作 - OrbitControls behavior changes based on interaction mode */}
                 <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
 
-                <Scene pcdFileContents={pcdFileContents} strokes={strokes} hideStrokes={interactionMode === "edit"} />
+                <Scene
+                  pcdFileContents={pcdFileContents}
+                  strokes={strokes}
+                  hideStrokes={interactionMode === "edit"}
+                  showMeasurements={interactionMode === "measure"}
+                />
                 <StrokeEditor strokes={strokes} onUpdateStroke={updateStroke} enabled={interactionMode === "edit"} />
                 <DrawingSurface
                   onFinish={persistStroke}
@@ -475,8 +477,9 @@ export default function App() {
         ) : (
           <span style={{ color: "#b45309", marginRight: 8 }}>⚠️ メモリのみ（リロードでリセット）</span>
         )}
-        Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Edit モード: 点をドラッグで移動 | Pan モード:
-        ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear はヘッダーから
+        Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Measure モード: 長さ・面積・周長を表示 | Edit
+        モード: 点をドラッグで移動 | Pan モード: ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 |
+        Undo・Clear はヘッダーから
       </footer>
     </div>
   );
