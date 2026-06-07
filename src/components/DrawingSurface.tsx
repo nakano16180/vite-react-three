@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useThree } from "@react-three/fiber";
-import { Line } from "@react-three/drei";
+import { Html, Line } from "@react-three/drei";
+import {
+  getPolygonArea,
+  getPolygonPerimeter,
+  getPolylineLength,
+  isPolygonCloseCandidate,
+  type Point2D,
+} from "../lib/geometry";
 
 interface DrawingSurfaceProps {
-  onFinish: (ptsPx: [number, number][], type: "line" | "polygon") => void | Promise<void>;
+  onFinish: (ptsPx: Point2D[], type: "line" | "polygon") => void | Promise<void>;
   color: string;
   width: number;
   enabled: boolean;
@@ -13,13 +20,16 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
   const { size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
-  const currentPtsPxRef = useRef<[number, number][]>([]);
+  const currentPtsPxRef = useRef<Point2D[]>([]);
 
-  const worldToPx = (wx: number, wy: number): [number, number] => {
-    const x = ((wx + viewport.width / 2) / viewport.width) * size.width;
-    const y = ((viewport.height / 2 - wy) / viewport.height) * size.height;
-    return [x, y];
-  };
+  const worldToPx = useCallback(
+    (wx: number, wy: number): Point2D => {
+      const x = ((wx + viewport.width / 2) / viewport.width) * size.width;
+      const y = ((viewport.height / 2 - wy) / viewport.height) * size.height;
+      return [x, y];
+    },
+    [size.height, size.width, viewport.height, viewport.width]
+  );
 
   const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
 
@@ -34,7 +44,7 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
     if (ptsPx.length < 2) return;
     const [startX, startY] = ptsPx[0];
     const [endX, endY] = ptsPx[ptsPx.length - 1];
-    const type = ptsPx.length >= 3 && Math.hypot(endX - startX, endY - startY) <= 20 ? "polygon" : "line";
+    const type = ptsPx.length >= 4 && Math.hypot(endX - startX, endY - startY) <= 20 ? "polygon" : "line";
     await onFinish(type === "polygon" ? ptsPx.slice(0, -1) : ptsPx, type);
   }, [onFinish]);
 
@@ -71,6 +81,14 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
   // プレビュー線：最後の確定点 → 現在のカーソル位置
   const lastPt = currentPtsWorld[currentPtsWorld.length - 1];
   const previewLine = enabled && lastPt && hoverWorld ? [lastPt, hoverWorld] : null;
+  const previewPtsPx =
+    enabled && hoverWorld && currentPtsPxRef.current.length > 0
+      ? [...currentPtsPxRef.current, worldToPx(hoverWorld[0], hoverWorld[1])]
+      : [];
+  const previewIsPolygon = isPolygonCloseCandidate(previewPtsPx);
+  const previewPolygonPts = previewIsPolygon ? previewPtsPx.slice(0, -1) : [];
+  const previewLength = previewIsPolygon ? getPolygonPerimeter(previewPolygonPts) : getPolylineLength(previewPtsPx);
+  const previewArea = previewIsPolygon ? getPolygonArea(previewPolygonPts) : undefined;
 
   // 最後の点のハイライト用サイズ
   const dotRadius = Math.max(0.01, (width / Math.max(size.width, size.height)) * viewport.width * 0.8);
@@ -88,6 +106,31 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
           transparent
           opacity={0.4}
         />
+      )}
+      {enabled && hoverWorld && previewPtsPx.length >= 2 && (
+        <Html position={[hoverWorld[0], hoverWorld[1], 0.002]} center>
+          <div
+            style={{
+              padding: "2px 5px",
+              borderRadius: 4,
+              background: "rgba(255, 255, 255, 0.85)",
+              color: "#333",
+              fontSize: 11,
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              textAlign: "left",
+            }}
+          >
+            {previewIsPolygon ? (
+              <>
+                <div>Area: {previewArea?.toFixed(1)} px²</div>
+                <div>Perimeter: {previewLength.toFixed(1)} px</div>
+              </>
+            ) : (
+              <div>Length: {previewLength.toFixed(1)} px</div>
+            )}
+          </div>
+        </Html>
       )}
       {/* 最後の点のハイライト */}
       {enabled && lastPt && (
