@@ -70,8 +70,10 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
     if (!enabled) return;
     e.stopPropagation();
     const p = e.point;
+    const nextWorld: [number, number, number] = [p.x, p.y, 0];
     currentPtsPxRef.current = [...currentPtsPxRef.current, worldToPx(p.x, p.y)];
-    setCurrentPtsWorld((prev) => [...prev, [p.x, p.y, 0]]);
+    setCurrentPtsWorld((prev) => [...prev, nextWorld]);
+    setHoverWorld(nextWorld);
   };
 
   const onPointerMove = (e: { point: { x: number; y: number; z: number } }) => {
@@ -87,9 +89,12 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
 
   // プレビュー線：最後の確定点 → 現在のカーソル位置
   const lastPt = currentPtsWorld[currentPtsWorld.length - 1];
-  const previewLine = enabled && lastPt && hoverWorld ? [lastPt, hoverWorld] : null;
+  const hasPreviewTarget = Boolean(
+    enabled && lastPt && hoverWorld && Math.hypot(hoverWorld[0] - lastPt[0], hoverWorld[1] - lastPt[1]) > 0.001
+  );
+  const previewLine = hasPreviewTarget && lastPt && hoverWorld ? [lastPt, hoverWorld] : null;
   const previewPtsPx =
-    enabled && hoverWorld && currentPtsPxRef.current.length > 0
+    hasPreviewTarget && hoverWorld && currentPtsPxRef.current.length > 0
       ? [...currentPtsPxRef.current, worldToPx(hoverWorld[0], hoverWorld[1])]
       : [];
   const previewIsPolygon = isPolygonCloseCandidate(previewPtsPx);
@@ -114,7 +119,7 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
           opacity={0.4}
         />
       )}
-      {enabled && hoverWorld && previewPtsPx.length >= 2 && (
+      {hasPreviewTarget && hoverWorld && previewPtsPx.length >= 2 && (
         <Html position={[hoverWorld[0], hoverWorld[1], 0.002]} center>
           <div
             style={{
