@@ -34,15 +34,18 @@ export function Scene({ strokes, pcdFileContents, hideStrokes = false, showMeasu
     };
 
     return strokes.map((s) => {
-      const points = s.ptsPx.map(([x, y]) => pxToWorld(x, y));
+      const ptsPx = s.ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+      const points = ptsPx.map(([x, y]) => pxToWorld(x, y));
+      const isRenderable = points.length >= 2;
       const isPolygon = s.geomType === "polygon" && points.length >= 3;
       const shape = isPolygon ? new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y))) : undefined;
-      const centroidWorld = pxToWorld(...getCentroid(s.ptsPx));
+      const centroidWorld = pxToWorld(...getCentroid(ptsPx));
       const measurementPosition = isPolygon
         ? ([centroidWorld[0], centroidWorld[1], 0.002] as [number, number, number])
         : points[points.length - 1];
       return {
         ...s,
+        isRenderable,
         points: isPolygon ? [...points, points[0]] : points,
         shape,
         measurementPosition,
@@ -55,37 +58,41 @@ export function Scene({ strokes, pcdFileContents, hideStrokes = false, showMeasu
       {!hideStrokes &&
         renderedStrokes.map((s) => (
           <group key={s.id}>
-            {s.shape && (
-              <mesh position={[0, 0, -0.001]}>
-                <shapeGeometry args={[s.shape]} />
-                <meshBasicMaterial color={s.color} transparent opacity={0.25} side={THREE.DoubleSide} />
-              </mesh>
-            )}
-            <Line points={s.points} color={s.color} lineWidth={s.width} />
-            {showMeasurements && s.measurementPosition && (
-              <Html position={s.measurementPosition} center>
-                <div
-                  style={{
-                    padding: "2px 5px",
-                    borderRadius: 4,
-                    background: "rgba(255, 255, 255, 0.85)",
-                    color: "#333",
-                    fontSize: 11,
-                    whiteSpace: "nowrap",
-                    pointerEvents: "none",
-                    textAlign: "left",
-                  }}
-                >
-                  {s.geomType === "polygon" ? (
-                    <>
-                      {Number.isFinite(s.area) && <div>Area: {s.area?.toFixed(1)} px²</div>}
-                      {Number.isFinite(s.perimeter) && <div>Perimeter: {s.perimeter?.toFixed(1)} px</div>}
-                    </>
-                  ) : (
-                    Number.isFinite(s.length) && <div>Length: {s.length?.toFixed(1)} px</div>
-                  )}
-                </div>
-              </Html>
+            {!s.isRenderable ? null : (
+              <>
+                {s.shape && (
+                  <mesh position={[0, 0, -0.001]}>
+                    <shapeGeometry args={[s.shape]} />
+                    <meshBasicMaterial color={s.color} transparent opacity={0.25} side={THREE.DoubleSide} />
+                  </mesh>
+                )}
+                <Line points={s.points} color={s.color} lineWidth={s.width} />
+                {showMeasurements && s.measurementPosition && (
+                  <Html position={s.measurementPosition} center>
+                    <div
+                      style={{
+                        padding: "2px 5px",
+                        borderRadius: 4,
+                        background: "rgba(255, 255, 255, 0.85)",
+                        color: "#333",
+                        fontSize: 11,
+                        whiteSpace: "nowrap",
+                        pointerEvents: "none",
+                        textAlign: "left",
+                      }}
+                    >
+                      {s.geomType === "polygon" ? (
+                        <>
+                          {Number.isFinite(s.area) && <div>Area: {s.area?.toFixed(1)} px²</div>}
+                          {Number.isFinite(s.perimeter) && <div>Perimeter: {s.perimeter?.toFixed(1)} px</div>}
+                        </>
+                      ) : (
+                        Number.isFinite(s.length) && <div>Length: {s.length?.toFixed(1)} px</div>
+                      )}
+                    </div>
+                  </Html>
+                )}
+              </>
             )}
           </group>
         ))}

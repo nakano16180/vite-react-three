@@ -59,6 +59,13 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [enabled, finishStroke]);
 
+  useEffect(() => {
+    if (enabled) return;
+    currentPtsPxRef.current = [];
+    setCurrentPtsWorld([]);
+    setHoverWorld(null);
+  }, [enabled]);
+
   const onClick = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
     if (!enabled) return;
     e.stopPropagation();
