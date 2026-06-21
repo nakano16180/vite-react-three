@@ -1,69 +1,116 @@
-# React + TypeScript + Vite
+# Vite React Three Drawing App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser-based drawing and measurement prototype built with Vite, React, TypeScript, React Three Fiber, DuckDB WASM, and MapLibre.
 
-Currently, two official plugins are available:
+The app lets you draw lines and polygons on a 2D Three.js canvas, persist them in DuckDB, measure length/area/perimeter, edit saved points, load PCD point-cloud files, and switch to a Tokyo-centered map view.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Features
 
-## Expanding the ESLint configuration
+- Draw mode: click points on the canvas, then press Escape or double-click to save.
+- Polygon detection: close a shape by ending near the first point.
+- Measure mode: displays line length or polygon area/perimeter.
+- Edit mode: move saved stroke points.
+- Pan mode: pan and zoom the orthographic canvas.
+- DuckDB WASM persistence with OPFS when available.
+- DuckDB spatial extension support with JSON-table fallback.
+- PCD file loading and rendering.
+- MapLibre map view using OpenStreetMap Japan styling.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Requirements
 
-```js
-export default tseslint.config([
-  globalIgnores(["dist"]),
-  {
-    files: ["**/*.{ts,tsx}"],
-    extends: [
-      // Other configs...
+- Node.js 22 or newer is recommended.
+- npm
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
+## Getting Started
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ["./tsconfig.node.json", "./tsconfig.app.json"],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-]);
+Install dependencies:
+
+```sh
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Start the development server:
 
-```js
-// eslint.config.js
-import reactX from "eslint-plugin-react-x";
-import reactDom from "eslint-plugin-react-dom";
-
-export default tseslint.config([
-  globalIgnores(["dist"]),
-  {
-    files: ["**/*.{ts,tsx}"],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs["recommended-typescript"],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ["./tsconfig.node.json", "./tsconfig.app.json"],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-]);
+```sh
+npm run dev
 ```
+
+Build for production:
+
+```sh
+npm run build
+```
+
+Preview a production build:
+
+```sh
+npm run preview
+```
+
+## Scripts
+
+- `npm run dev`: start Vite.
+- `npm run build`: run TypeScript build checks and create a Vite production build.
+- `npm run lint`: run ESLint.
+- `npm run lint:fix`: run ESLint with automatic fixes.
+- `npm run format`: format files with Prettier.
+- `npm run format:check`: check Prettier formatting.
+- `npm run preview`: preview the production build.
+
+## App Structure
+
+- `src/App.tsx`: app state, DuckDB initialization, persistence, and mode switching.
+- `src/components/Header.tsx`: toolbar controls.
+- `src/components/DrawingSurface.tsx`: canvas drawing interactions.
+- `src/components/Scene.tsx`: stroke, measurement, polygon, and PCD rendering.
+- `src/components/StrokeEditor.tsx`: point editing.
+- `src/components/MapView.tsx`: MapLibre map display.
+- `src/lib/geometry.ts`: geometry calculations.
+- `src/dbBundles.ts`: manually bundled DuckDB WASM assets.
+
+## DuckDB Notes
+
+The app attempts to open an OPFS-backed DuckDB database at `opfs://vite-react-three.duckdb`. If OPFS is unavailable, it falls back to an in-memory database.
+
+The app also attempts to install and load DuckDB's `spatial` extension. When the extension is unavailable, geometry is still stored in the JSON fallback table, but spatial-specific behavior may be limited.
+
+The Vite dev server sends cross-origin isolation headers required by some DuckDB WASM configurations:
+
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
+
+## Testing
+
+There is no committed automated test runner yet. For current validation, run:
+
+```sh
+npm run lint
+npm run build
+```
+
+Good next steps for automated coverage:
+
+- Add unit tests for `src/lib/geometry.ts`.
+- Add tests for geometry serialization and persistence behavior.
+- Add Playwright tests for draw, edit, measure, pan, undo, clear, and PCD-loading workflows.
+
+Playwright can test canvas drawing by using fixed pointer coordinates relative to the canvas bounding box. This app's drawing flow is click-based:
+
+```ts
+const canvas = page.locator("canvas");
+const box = await canvas.boundingBox();
+if (!box) throw new Error("canvas not found");
+
+await page.mouse.click(box.x + 100, box.y + 100);
+await page.mouse.click(box.x + 240, box.y + 100);
+await page.mouse.click(box.x + 240, box.y + 180);
+await page.keyboard.press("Escape");
+```
+
+For React Three Fiber/WebGL output, prefer canvas screenshots with a fixed viewport:
+
+```ts
+await expect(canvas).toHaveScreenshot("drawn-line.png");
+```
+
+Pixel reads through `getContext("2d")` are not reliable for WebGL canvas output, so screenshot comparisons or DOM-visible measurement labels are usually better assertions.
