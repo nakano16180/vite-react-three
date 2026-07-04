@@ -14,6 +14,8 @@ interface HeaderProps {
   handleUndo: () => void;
   handleRefresh: () => void;
   handleClear: () => void;
+  handleExportGeoJSON: () => void;
+  handleImportGeoJSON: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleFileLoad: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleClearPointClouds: () => void;
   pcdFileContents: string[];
@@ -33,6 +35,8 @@ export function Header({
   handleUndo,
   handleRefresh,
   handleClear,
+  handleExportGeoJSON,
+  handleImportGeoJSON,
   handleFileLoad,
   handleClearPointClouds,
   pcdFileContents,
@@ -46,17 +50,24 @@ export function Header({
         display: "flex",
         gap: 8,
         alignItems: "center",
+        flexWrap: "wrap",
         borderBottom: "1px solid #e5e5e5",
         background: "#fff",
       }}
     >
-      <h1 style={{ fontSize: 16, fontWeight: 600 }}>DuckDB Spatial × R3F — Line Draw & PCD Viewer</h1>
+      <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0, flex: "1 1 220px" }}>
+        DuckDB Spatial × R3F — Line Draw & PCD Viewer
+      </h1>
       <div
         style={{
           marginLeft: "auto",
           display: "flex",
           gap: 8,
           alignItems: "center",
+          justifyContent: "flex-end",
+          flex: "999 1 520px",
+          flexWrap: "wrap",
+          minWidth: 0,
         }}
       >
         {/* Mode Toggle */}
@@ -65,6 +76,7 @@ export function Header({
             display: "flex",
             gap: 4,
             alignItems: "center",
+            flexWrap: "wrap",
             marginRight: 16,
             borderRight: "1px solid #e5e5e5",
             paddingRight: 16,
@@ -188,6 +200,44 @@ export function Header({
           Clear
         </button>
 
+        {/* GeoJSON Import / Export */}
+        <div
+          style={{
+            marginLeft: 16,
+            borderLeft: "1px solid #e5e5e5",
+            paddingLeft: 16,
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <button onClick={handleExportGeoJSON} style={{ fontSize: 12 }}>
+            Export GeoJSON
+          </button>
+          <label
+            htmlFor="geojson-file-input"
+            style={{
+              cursor: "pointer",
+              padding: "4px 8px",
+              backgroundColor: "#f8f9fa",
+              color: "#212529",
+              border: "1px solid #dee2e6",
+              borderRadius: 4,
+              fontSize: 12,
+            }}
+          >
+            Import GeoJSON
+          </label>
+          <input
+            id="geojson-file-input"
+            type="file"
+            accept=".geojson,.json,application/geo+json,application/json"
+            onChange={handleImportGeoJSON}
+            style={{ display: "none" }}
+          />
+        </div>
+
         {/* PCD File Loading */}
         <div
           style={{
@@ -197,6 +247,7 @@ export function Header({
             display: "flex",
             gap: 8,
             alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
           <label

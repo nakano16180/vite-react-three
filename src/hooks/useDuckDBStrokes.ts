@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import * as duckdb from "@duckdb/duckdb-wasm";
 import { bundle } from "../dbBundles";
 import { getPolygonArea, getPolygonPerimeter, getPolylineLength, pointsEqual, type Point2D } from "../lib/geometry";
@@ -56,6 +56,82 @@ const parseGeometryFromGeoJSON = (
 const toStr = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
 const toNum = (v: unknown): number => (typeof v === "number" ? v : Number(v));
 const toGeometryType = (v: unknown): GeometryType => (toStr(v) === "polygon" ? "polygon" : "line");
+const newStrokeId = () => crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+
+type GeoJSONLineString = {
+  type: "LineString";
+  coordinates: Point2D[];
+};
+
+type GeoJSONPolygon = {
+  type: "Polygon";
+  coordinates: Point2D[][];
+};
+
+type SupportedGeoJSONGeometry = GeoJSONLineString | GeoJSONPolygon;
+
+type GeoJSONFeature = {
+  type: "Feature";
+  geometry: SupportedGeoJSONGeometry | null;
+  properties?: Record<string, unknown> | null;
+};
+
+type GeoJSONFeatureCollection = {
+  type: "FeatureCollection";
+  features: GeoJSONFeature[];
+};
+
+type GeoJSONInput = GeoJSONFeature | GeoJSONFeatureCollection;
+
+const isPoint2D = (value: unknown): value is Point2D =>
+  Array.isArray(value) && value.length >= 2 && Number.isFinite(value[0]) && Number.isFinite(value[1]);
+
+const normalizePoints = (coordinates: unknown): Point2D[] => {
+  if (!Array.isArray(coordinates)) return [];
+  return coordinates.filter(isPoint2D).map(([x, y]) => [x, y]);
+};
+
+const toGeoJSONGeometry = (ptsPx: Point2D[], geomType: GeometryType): SupportedGeoJSONGeometry => {
+  if (geomType === "polygon") {
+    const closed = ptsPx.length > 0 && !pointsEqual(ptsPx[0], ptsPx[ptsPx.length - 1]) ? [...ptsPx, ptsPx[0]] : ptsPx;
+    return { type: "Polygon", coordinates: [closed] };
+  }
+  return { type: "LineString", coordinates: ptsPx };
+};
+
+const normalizeImportedGeometry = (
+  geometry: unknown
+): { geomType: GeometryType; geometry: SupportedGeoJSONGeometry; ptsPx: Point2D[] } | null => {
+  if (!geometry || typeof geometry !== "object") return null;
+  const candidate = geometry as { type?: unknown; coordinates?: unknown };
+  if (candidate.type === "LineString") {
+    const ptsPx = normalizePoints(candidate.coordinates);
+    if (ptsPx.length < 2) return null;
+    return { geomType: "line", geometry: { type: "LineString", coordinates: ptsPx }, ptsPx };
+  }
+  if (candidate.type === "Polygon") {
+    const rings = Array.isArray(candidate.coordinates) ? candidate.coordinates : [];
+    const ptsPx = normalizePoints(rings[0]);
+    if (ptsPx.length > 1 && pointsEqual(ptsPx[0], ptsPx[ptsPx.length - 1])) {
+      ptsPx.pop();
+    }
+    if (ptsPx.length < 3) return null;
+    return { geomType: "polygon", geometry: toGeoJSONGeometry(ptsPx, "polygon") as GeoJSONPolygon, ptsPx };
+  }
+  return null;
+};
+
+const toFeatureCollection = (input: unknown): GeoJSONFeatureCollection | null => {
+  if (!input || typeof input !== "object") return null;
+  const candidate = input as GeoJSONInput;
+  if (candidate.type === "FeatureCollection" && Array.isArray(candidate.features)) {
+    return { type: "FeatureCollection", features: candidate.features };
+  }
+  if (candidate.type === "Feature") {
+    return { type: "FeatureCollection", features: [candidate] };
+  }
+  return null;
+};
 
 const checkpoint = async (conn: duckdb.AsyncDuckDBConnection) => {
   try {
@@ -252,6 +328,123 @@ export function useDuckDBStrokes(strokeColor: string, strokeWidth: number, simpl
     await checkpoint(dbConn);
   }, [dbConn, reloadFromDB, spatialLoaded]);
 
+  const handleExportGeoJSON = useCallback(async () => {
+    if (!dbConn) return;
+
+    const features: GeoJSONFeature[] = [];
+    if (spatialLoaded) {
+      const res = await dbConn.query(`
+        SELECT id, color, width, geom_type, ST_AsGeoJSON(geom) AS geometry
+        FROM strokes
+        ORDER BY created_at ASC;
+      `);
+      for (const row of res.toArray()) {
+        const obj = row.toJSON() as Record<string, unknown>;
+        const geometry = normalizeImportedGeometry(JSON.parse(toStr(obj["geometry"])));
+        if (!geometry) continue;
+        features.push({
+          type: "Feature",
+          geometry: geometry.geometry,
+          properties: {
+            id: toStr(obj["id"]),
+            color: toStr(obj["color"]) || "#222222",
+            width: Number.isFinite(toNum(obj["width"])) ? toNum(obj["width"]) : 3,
+            geomType: toGeometryType(obj["geom_type"]),
+          },
+        });
+      }
+    }
+
+    const resJ = await dbConn.query(`
+      SELECT id, color, width, coords, geom_type
+      FROM strokes_json
+      ORDER BY created_at ASC;
+    `);
+    for (const row of resJ.toArray()) {
+      const obj = row.toJSON() as Record<string, unknown>;
+      const geomType = toGeometryType(obj["geom_type"]);
+      const ptsPx = normalizePoints(JSON.parse(toStr(obj["coords"])));
+      if (ptsPx.length < (geomType === "polygon" ? 3 : 2)) continue;
+      features.push({
+        type: "Feature",
+        geometry: toGeoJSONGeometry(ptsPx, geomType),
+        properties: {
+          id: toStr(obj["id"]),
+          color: toStr(obj["color"]) || "#222222",
+          width: Number.isFinite(toNum(obj["width"])) ? toNum(obj["width"]) : 3,
+          geomType,
+        },
+      });
+    }
+
+    const featureCollection: GeoJSONFeatureCollection = { type: "FeatureCollection", features };
+    const blob = new Blob([JSON.stringify(featureCollection, null, 2)], { type: "application/geo+json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `strokes-${new Date().toISOString().slice(0, 10)}.geojson`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, [dbConn, spatialLoaded]);
+
+  const handleImportGeoJSON = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!dbConn || !file) return;
+
+      try {
+        const parsed = JSON.parse(await file.text());
+        const featureCollection = toFeatureCollection(parsed);
+        if (!featureCollection) {
+          alert("Please select a GeoJSON FeatureCollection or Feature file.");
+          return;
+        }
+
+        let importedCount = 0;
+        for (const feature of featureCollection.features) {
+          if (!feature || feature.type !== "Feature") continue;
+          const imported = normalizeImportedGeometry(feature.geometry);
+          if (!imported) continue;
+
+          const properties = feature.properties ?? {};
+          const widthRaw = toNum(properties.width);
+          const width = Number.isFinite(widthRaw) ? widthRaw : 3;
+          const color = toStr(properties.color) || "#222222";
+          const id = newStrokeId();
+
+          if (spatialLoaded) {
+            const insert = await dbConn.prepare(
+              `INSERT INTO strokes(id, geom, color, width, geom_type) VALUES (?, ST_GeomFromGeoJSON(CAST(? AS VARCHAR)), ?, ?, ?);`
+            );
+            await insert.query(id, JSON.stringify(imported.geometry), color, width, imported.geomType);
+            await insert.close();
+          } else {
+            const insertJ = await dbConn.prepare(
+              `INSERT INTO strokes_json(id, coords, color, width, geom_type) VALUES (?, ?, ?, ?, ?);`
+            );
+            await insertJ.query(id, JSON.stringify(imported.ptsPx), color, width, imported.geomType);
+            await insertJ.close();
+          }
+          importedCount += 1;
+        }
+
+        if (importedCount === 0) {
+          alert("No supported LineString or Polygon features were found.");
+          return;
+        }
+        await reloadFromDB();
+        await checkpoint(dbConn);
+      } catch (error) {
+        console.error("GeoJSON import failed:", error);
+        alert("Failed to import GeoJSON. Please check the file format.");
+      }
+    },
+    [dbConn, reloadFromDB, spatialLoaded]
+  );
+
   const updateStroke = useCallback(
     async (strokeId: string, newPtsPx: Point2D[]) => {
       if (!dbConn || newPtsPx.length < 2) return;
@@ -278,7 +471,7 @@ export function useDuckDBStrokes(strokeColor: string, strokeWidth: number, simpl
 
       if (spatialLoaded) {
         const wkt = String(toWKT(ptsPx, geomType));
-        const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+        const newId = newStrokeId();
 
         const insert = await dbConn.prepare(
           `INSERT INTO strokes(id, geom, color, width, geom_type) VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?, ?);`
@@ -292,7 +485,7 @@ export function useDuckDBStrokes(strokeColor: string, strokeWidth: number, simpl
           await upd.close();
         }
       } else {
-        const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+        const newId = newStrokeId();
         const insertJ = await dbConn.prepare(
           `INSERT INTO strokes_json(id, coords, color, width, geom_type) VALUES (?, ?, ?, ?, ?);`
         );
@@ -308,6 +501,8 @@ export function useDuckDBStrokes(strokeColor: string, strokeWidth: number, simpl
 
   return {
     handleClear,
+    handleExportGeoJSON,
+    handleImportGeoJSON,
     handleRefresh: reloadFromDB,
     handleUndo,
     loading,
