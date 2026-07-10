@@ -126,6 +126,8 @@ export default function App() {
   const [showMap, setShowMap] = useState(false);
   const {
     handleClear,
+    handleExportGeoJSON,
+    handleImportGeoJSON,
     handleRefresh,
     handleUndo,
     loading,
@@ -182,6 +184,8 @@ export default function App() {
         handleUndo={handleUndo}
         handleRefresh={handleRefresh}
         handleClear={handleClear}
+        handleExportGeoJSON={handleExportGeoJSON}
+        handleImportGeoJSON={handleImportGeoJSON}
         handleFileLoad={handleFileLoad}
         handleClearPointClouds={handleClearPointClouds}
         pcdFileContents={pcdFileContents}
