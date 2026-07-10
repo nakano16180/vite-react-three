@@ -1,288 +1,141 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import * as duckdb from "@duckdb/duckdb-wasm";
-import { bundle } from "./dbBundles";
 import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
 import { MapView } from "./components/MapView";
 import { StrokeEditor } from "./components/StrokeEditor";
-import { getPolygonArea, getPolygonPerimeter, getPolylineLength, pointsEqual, type Point2D } from "./lib/geometry";
-
-// DuckDB への保存は px 座標（画面座標）で行います
-type GeometryType = "line" | "polygon";
-
-const toLineWKT = (ptsPx: Point2D[]) => {
-  // 非数値/NaN を除外して WKT を生成
-  const filtered = ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-  const body = filtered.map(([x, y]) => `${x} ${y}`).join(", ");
-  return `LINESTRING(${body})`;
-};
-
-const toPolygonWKT = (ptsPx: Point2D[]) => {
-  const filtered = ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-  const closed =
-    filtered.length > 0 && !pointsEqual(filtered[0], filtered[filtered.length - 1])
-      ? [...filtered, filtered[0]]
-      : filtered;
-  const body = closed.map(([x, y]) => `${x} ${y}`).join(", ");
-  return `POLYGON((${body}))`;
-};
-
-const toWKT = (ptsPx: Point2D[], type: GeometryType) => (type === "polygon" ? toPolygonWKT(ptsPx) : toLineWKT(ptsPx));
-
-const parseGeometryFromGeoJSON = (
-  gj: { type?: string; coordinates?: [number, number][] | [number, number][][] },
-  type: GeometryType
-): Point2D[] => {
-  let coordinates: Point2D[];
-  if (type === "polygon") {
-    if (gj.type !== "Polygon" || !gj.coordinates) return [];
-    coordinates = gj.coordinates[0] as Point2D[];
-  } else {
-    if (gj.type !== "LineString" || !gj.coordinates) return [];
-    coordinates = gj.coordinates as Point2D[];
-  }
-  const points = coordinates.map((c) => [c[0], c[1]] as Point2D);
-  if (type === "polygon" && points.length > 1 && pointsEqual(points[0], points[points.length - 1])) {
-    points.pop();
-  }
-  return points;
-};
-
-const toStr = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
-const toNum = (v: unknown): number => (typeof v === "number" ? v : Number(v));
-const toGeometryType = (v: unknown): GeometryType => (toStr(v) === "polygon" ? "polygon" : "line");
-
-interface Stroke {
-  id: string;
-  color: string;
-  width: number; // px 単位
-  ptsPx: Point2D[]; // DB は px 座標で保持
-  geomType: GeometryType;
-  length?: number;
-  area?: number;
-  perimeter?: number;
-}
+import { useDuckDBStrokes, type Stroke } from "./hooks/useDuckDBStrokes";
+import type { Point2D } from "./lib/geometry";
 
 type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
+interface WorkspaceProps {
+  interactionMode: InteractionMode;
+  loading: boolean;
+  pcdFileContents: string[];
+  showMap: boolean;
+  spatialLoaded: boolean;
+  strokeColor: string;
+  strokeWidth: number;
+  strokes: Stroke[];
+  onFinishStroke: ReturnType<typeof useDuckDBStrokes>["persistStroke"];
+  onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
+}
+
+function Workspace({
+  interactionMode,
+  loading,
+  pcdFileContents,
+  showMap,
+  spatialLoaded,
+  strokeColor,
+  strokeWidth,
+  strokes,
+  onFinishStroke,
+  onUpdateStroke,
+}: WorkspaceProps) {
+  return (
+    <main style={{ flex: 1, padding: 12, minHeight: 0 }}>
+      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+        <div style={{ position: "absolute", inset: 0 }}>
+          {showMap ? (
+            <MapView visible={showMap} />
+          ) : (
+            <Canvas orthographic camera={{ position: [0, 0, 100], zoom: 1 }} style={{ width: "100%", height: "100%" }}>
+              <color attach="background" args={["#ffffff"]} />
+              <ambientLight intensity={0.5} />
+              <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
+
+              <Scene
+                pcdFileContents={pcdFileContents}
+                strokes={strokes}
+                hideStrokes={interactionMode === "edit"}
+                showMeasurements={interactionMode === "measure"}
+              />
+              <StrokeEditor strokes={strokes} onUpdateStroke={onUpdateStroke} enabled={interactionMode === "edit"} />
+              <DrawingSurface
+                onFinish={onFinishStroke}
+                color={strokeColor}
+                width={strokeWidth}
+                enabled={interactionMode === "draw"}
+              />
+            </Canvas>
+          )}
+        </div>
+
+        {loading && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "grid",
+              placeItems: "center",
+              fontSize: 12,
+              color: "#666",
+            }}
+          >
+            DuckDB を初期化中…
+          </div>
+        )}
+        {!loading && !spatialLoaded && (
+          <div className="workspace-warning-overlay">
+            spatial 拡張のロードに失敗しました。環境によっては利用できない場合があります。
+            <br />
+            その場合、保存・再描画が動作しません（コンソールのログをご確認ください）。
+          </div>
+        )}
+
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            borderRadius: 16,
+            boxShadow: "0 1px 8px rgba(0,0,0,.05)",
+            border: "1px solid #e5e5e5",
+          }}
+        />
+      </div>
+    </main>
+  );
+}
+
+function StatusFooter({ opfsLoaded }: { opfsLoaded: boolean }) {
+  return (
+    <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
+      {opfsLoaded ? (
+        <span style={{ color: "#16a34a", marginRight: 8 }}>💾 データ永続化中 (OPFS)</span>
+      ) : (
+        <span style={{ color: "#b45309", marginRight: 8 }}>⚠️ メモリのみ（リロードでリセット）</span>
+      )}
+      Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Measure モード: 長さ・面積・周長を表示 | Edit
+      モード: 点をドラッグで移動 | Pan モード: ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear
+      はヘッダーから
+    </footer>
+  );
+}
+
 export default function App() {
-  const [dbConn, setDbConn] = useState<duckdb.AsyncDuckDBConnection | null>(null);
-  const [spatialLoaded, setSpatialLoaded] = useState(false);
-  const [opfsLoaded, setOpfsLoaded] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [pcdFileContents, setPcdFileContents] = useState<string[]>([]);
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("draw");
-
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [simplifyOn, setSimplifyOn] = useState(true);
   const [showMap, setShowMap] = useState(false);
+  const {
+    handleClear,
+    handleRefresh,
+    handleUndo,
+    loading,
+    opfsLoaded,
+    persistStroke,
+    spatialLoaded,
+    strokes,
+    updateStroke,
+  } = useDuckDBStrokes(strokeColor, strokeWidth, simplifyOn);
 
-  // DuckDB 初期化
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setLoading(true);
-        const worker = new Worker(bundle.mainWorker!, { type: "module" });
-        const logger = new duckdb.ConsoleLogger();
-        const _db = new duckdb.AsyncDuckDB(logger, worker);
-        await _db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-
-        // OPFSを使って永続化を試みる
-        let opfsOK = false;
-        try {
-          await _db.open({
-            path: "opfs://vite-react-three.duckdb",
-            accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
-          });
-          opfsOK = true;
-        } catch (e) {
-          console.warn("OPFS not available, using in-memory database:", e);
-        }
-
-        const _conn = await _db.connect();
-
-        let spatialOK = false;
-        try {
-          await _conn.query(`INSTALL spatial;`);
-          await _conn.query(`LOAD spatial;`);
-          setSpatialLoaded(true);
-          spatialOK = true;
-        } catch (e) {
-          console.warn("spatial extension load failed:", e);
-          setSpatialLoaded(false);
-        }
-
-        // フォールバック用の JSON テーブルは常に用意
-        await _conn.query(`
-          CREATE TABLE IF NOT EXISTS strokes_json (
-            id    TEXT PRIMARY KEY,
-            coords JSON,
-            color VARCHAR,
-            width DOUBLE,
-            geom_type VARCHAR DEFAULT 'line',
-            created_at TIMESTAMP DEFAULT now()
-          );
-        `);
-        await _conn.query(`ALTER TABLE strokes_json ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';`);
-
-        // spatial が使える環境では GEOMETRY テーブルも作成
-        // id は TEXT にして、ブラウザ側で UUID を付与（uuid 拡張不要）
-        if (spatialOK) {
-          await _conn.query(`
-          CREATE TABLE IF NOT EXISTS strokes (
-            id    TEXT PRIMARY KEY,
-            geom  GEOMETRY,
-            color VARCHAR,
-            width DOUBLE,
-            geom_type VARCHAR DEFAULT 'line',
-            created_at TIMESTAMP DEFAULT now()
-          );
-        `);
-          await _conn.query(`ALTER TABLE strokes ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';`);
-        }
-
-        if (!cancelled) {
-          setDbConn(_conn);
-          setOpfsLoaded(opfsOK);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // OPFSに確実に書き込むためチェックポイントを実行
-  const checkpoint = async (conn: duckdb.AsyncDuckDBConnection) => {
-    try {
-      await conn.query(`CHECKPOINT;`);
-    } catch (e) {
-      console.warn("CHECKPOINT failed:", e);
-    }
-  };
-
-  // DB → strokes を読み直し
-  const reloadFromDB = async () => {
-    if (!dbConn) return;
-    const list: Stroke[] = [];
-
-    if (spatialLoaded) {
-      const res = await dbConn.query(`
-        SELECT id, color, width, geom_type, ST_AsGeoJSON(geom) AS gj,
-               CASE WHEN geom_type = 'line' THEN ST_Length(geom) END AS length,
-               CASE WHEN geom_type = 'polygon' THEN ST_Area(geom) END AS area
-        FROM strokes
-        ORDER BY created_at ASC;
-      `);
-      const rows = res.toArray();
-      for (const row of rows) {
-        const obj = row.toJSON() as Record<string, unknown>;
-        const id = toStr(obj["id"]);
-        const color = toStr(obj["color"]) || "#222";
-        const widthRaw = toNum(obj["width"]);
-        const width = Number.isFinite(widthRaw) ? widthRaw : 3;
-        const geomType = toGeometryType(obj["geom_type"]);
-        const lengthRaw = toNum(obj["length"]);
-        const areaRaw = toNum(obj["area"]);
-        const gj = JSON.parse(toStr(obj["gj"]));
-        const ptsPx = parseGeometryFromGeoJSON(gj, geomType);
-        list.push({
-          id,
-          color,
-          width,
-          geomType,
-          length: Number.isFinite(lengthRaw) ? lengthRaw : getPolylineLength(ptsPx),
-          area: geomType === "polygon" ? (Number.isFinite(areaRaw) ? areaRaw : getPolygonArea(ptsPx)) : undefined,
-          perimeter: geomType === "polygon" ? getPolygonPerimeter(ptsPx) : undefined,
-          ptsPx,
-        });
-      }
-    }
-
-    // JSON 方式（フォールバック/併用）
-    const resJ = await dbConn.query(`
-      SELECT id, color, width, coords, geom_type
-      FROM strokes_json
-      ORDER BY created_at ASC;
-    `);
-    const rowsJ = resJ.toArray();
-    for (const row of rowsJ) {
-      const obj = row.toJSON() as Record<string, unknown>;
-      const id = toStr(obj["id"]);
-      const color = toStr(obj["color"]) || "#222";
-      const widthRaw = toNum(obj["width"]);
-      const width = Number.isFinite(widthRaw) ? widthRaw : 3;
-      const geomType = toGeometryType(obj["geom_type"]);
-      const coordsStr = toStr(obj["coords"]);
-      let pts: Point2D[] = [];
-      try {
-        const a = JSON.parse(coordsStr);
-        if (Array.isArray(a)) pts = a as Point2D[];
-      } catch {
-        // Ignore parsing errors, use empty array
-      }
-      list.push({
-        id,
-        color,
-        width,
-        geomType,
-        length: getPolylineLength(pts),
-        area: geomType === "polygon" ? getPolygonArea(pts) : undefined,
-        perimeter: geomType === "polygon" ? getPolygonPerimeter(pts) : undefined,
-        ptsPx: pts,
-      });
-    }
-
-    setStrokes(list);
-  };
-
-  useEffect(() => {
-    if (!dbConn) return;
-    reloadFromDB();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbConn, spatialLoaded]);
-
-  // 直前のストローク削除（Undo）
-  const handleUndo = async () => {
-    if (!dbConn) return;
-    if (spatialLoaded) {
-      await dbConn.query(`
-        DELETE FROM strokes WHERE id IN (
-          SELECT id FROM strokes ORDER BY created_at DESC LIMIT 1
-        );
-      `);
-    } else {
-      await dbConn.query(`
-        DELETE FROM strokes_json WHERE id IN (
-          SELECT id FROM strokes_json ORDER BY created_at DESC LIMIT 1
-        );
-      `);
-    }
-    await reloadFromDB();
-    await checkpoint(dbConn);
-  };
-
-  const handleClear = async () => {
-    if (!dbConn) return;
-    if (spatialLoaded) {
-      await dbConn.query(`DELETE FROM strokes;`);
-    }
-    await dbConn.query(`DELETE FROM strokes_json;`);
-    await reloadFromDB();
-    await checkpoint(dbConn);
-  };
-
-  const handleRefresh = async () => reloadFromDB();
-
-  // Handle PCD file loading
   const handleFileLoad = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -300,63 +153,11 @@ export default function App() {
       }
     };
     reader.readAsText(file);
-
-    // Reset the input so the same file can be loaded again
     event.target.value = "";
   };
 
   const handleClearPointClouds = () => {
     setPcdFileContents([]);
-  };
-
-  // 点を動かした後にストロークを更新
-  const updateStroke = async (strokeId: string, newPtsPx: Point2D[]) => {
-    if (!dbConn || newPtsPx.length < 2) return;
-    if (spatialLoaded) {
-      const stroke = strokes.find(({ id }) => id === strokeId);
-      const geomType = stroke?.geomType ?? "line";
-      const wkt = String(toWKT(newPtsPx, geomType));
-      const upd = await dbConn.prepare(`UPDATE strokes SET geom = ST_GeomFromText(CAST(? AS VARCHAR)) WHERE id = ?;`);
-      await upd.query(wkt, strokeId);
-      await upd.close();
-    }
-    const updJ = await dbConn.prepare(`UPDATE strokes_json SET coords = ? WHERE id = ?;`);
-    await updJ.query(JSON.stringify(newPtsPx), strokeId);
-    await updJ.close();
-    await reloadFromDB();
-    await checkpoint(dbConn);
-  };
-
-  // ドラッグ終了時に DB に保存
-  const persistStroke = async (ptsPx: Point2D[], geomType: GeometryType) => {
-    if (!dbConn || ptsPx.length < (geomType === "polygon" ? 3 : 2)) return;
-
-    if (spatialLoaded) {
-      const wkt = String(toWKT(ptsPx, geomType));
-      const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-
-      const insert = await dbConn.prepare(
-        `INSERT INTO strokes(id, geom, color, width, geom_type) VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), ?, ?, ?);`
-      );
-      await insert.query(newId, wkt, strokeColor, strokeWidth, geomType);
-      await insert.close();
-
-      if (simplifyOn) {
-        const upd = await dbConn.prepare(`UPDATE strokes SET geom = ST_Simplify(geom, ?) WHERE id = ?;`);
-        await upd.query(Math.max(0, Math.min(strokeWidth * 0.3, 3)), newId);
-        await upd.close();
-      }
-    } else {
-      const newId = crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-      const insertJ = await dbConn.prepare(
-        `INSERT INTO strokes_json(id, coords, color, width, geom_type) VALUES (?, ?, ?, ?, ?);`
-      );
-      await insertJ.query(newId, JSON.stringify(ptsPx), strokeColor, strokeWidth, geomType);
-      await insertJ.close();
-    }
-
-    await reloadFromDB();
-    await checkpoint(dbConn);
   };
 
   return (
@@ -388,99 +189,20 @@ export default function App() {
         setShowMap={setShowMap}
       />
 
-      <main style={{ flex: 1, padding: 12, minHeight: 0 }}>
-        {/* 親は高さを持つだけ。装飾は持たせない */}
-        <div style={{ position: "relative", width: "100%", height: "100%" }}>
-          {/* Canvas は absolute で inset:0（%高さ連鎖を断つ） */}
-          <div style={{ position: "absolute", inset: 0 }}>
-            {showMap ? (
-              <MapView visible={showMap} />
-            ) : (
-              <Canvas
-                orthographic
-                camera={{ position: [0, 0, 100], zoom: 1 }}
-                style={{ width: "100%", height: "100%" }}
-              >
-                <color attach="background" args={["#ffffff"]} />
-                <ambientLight intensity={0.5} />
-                {/* 画面操作 - OrbitControls behavior changes based on interaction mode */}
-                <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
+      <Workspace
+        interactionMode={interactionMode}
+        loading={loading}
+        pcdFileContents={pcdFileContents}
+        showMap={showMap}
+        spatialLoaded={spatialLoaded}
+        strokeColor={strokeColor}
+        strokeWidth={strokeWidth}
+        strokes={strokes}
+        onFinishStroke={persistStroke}
+        onUpdateStroke={updateStroke}
+      />
 
-                <Scene
-                  pcdFileContents={pcdFileContents}
-                  strokes={strokes}
-                  hideStrokes={interactionMode === "edit"}
-                  showMeasurements={interactionMode === "measure"}
-                />
-                <StrokeEditor strokes={strokes} onUpdateStroke={updateStroke} enabled={interactionMode === "edit"} />
-                <DrawingSurface
-                  onFinish={persistStroke}
-                  color={strokeColor}
-                  width={strokeWidth}
-                  enabled={interactionMode === "draw"}
-                />
-              </Canvas>
-            )}
-          </div>
-
-          {/* ローディング/警告オーバーレイ */}
-          {loading && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "grid",
-                placeItems: "center",
-                fontSize: 12,
-                color: "#666",
-              }}
-            >
-              DuckDB を初期化中…
-            </div>
-          )}
-          {!loading && !spatialLoaded && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "grid",
-                placeItems: "center",
-                fontSize: 12,
-                color: "#b45309",
-                padding: 16,
-                textAlign: "center",
-              }}
-            >
-              spatial 拡張のロードに失敗しました。環境によっては利用できない場合があります。
-              <br />
-              その場合、保存・再描画が動作しません（コンソールのログをご確認ください）。
-            </div>
-          )}
-
-          {/* 枠の装飾はオーバーレイに分離 */}
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              pointerEvents: "none",
-              borderRadius: 16,
-              boxShadow: "0 1px 8px rgba(0,0,0,.05)",
-              border: "1px solid #e5e5e5",
-            }}
-          />
-        </div>
-      </main>
-
-      <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
-        {opfsLoaded ? (
-          <span style={{ color: "#16a34a", marginRight: 8 }}>💾 データ永続化中 (OPFS)</span>
-        ) : (
-          <span style={{ color: "#b45309", marginRight: 8 }}>⚠️ メモリのみ（リロードでリセット）</span>
-        )}
-        Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Measure モード: 長さ・面積・周長を表示 | Edit
-        モード: 点をドラッグで移動 | Pan モード: ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 |
-        Undo・Clear はヘッダーから
-      </footer>
+      <StatusFooter opfsLoaded={opfsLoaded} />
     </div>
   );
 }
