@@ -45,6 +45,7 @@ export function Header({
 }: HeaderProps) {
   return (
     <header
+      data-testid="app-header"
       style={{
         padding: 12,
         display: "flex",
@@ -72,6 +73,7 @@ export function Header({
       >
         {/* Mode Toggle */}
         <div
+          data-testid="mode-controls"
           style={{
             display: "flex",
             gap: 4,
@@ -84,6 +86,7 @@ export function Header({
         >
           <span style={{ fontSize: 12, fontWeight: 600 }}>Mode:</span>
           <button
+            aria-pressed={interactionMode === "draw"}
             onClick={() => setInteractionMode("draw")}
             style={{
               padding: "4px 8px",
@@ -98,6 +101,7 @@ export function Header({
             Draw
           </button>
           <button
+            aria-pressed={interactionMode === "pan"}
             onClick={() => setInteractionMode("pan")}
             style={{
               padding: "4px 8px",
@@ -112,6 +116,7 @@ export function Header({
             Pan
           </button>
           <button
+            aria-pressed={interactionMode === "edit"}
             onClick={() => setInteractionMode("edit")}
             style={{
               padding: "4px 8px",
@@ -126,6 +131,7 @@ export function Header({
             Edit
           </button>
           <button
+            aria-pressed={interactionMode === "measure"}
             onClick={() => setInteractionMode("measure")}
             style={{
               padding: "4px 8px",
@@ -153,6 +159,7 @@ export function Header({
           }}
         >
           <button
+            aria-pressed={showMap}
             onClick={() => setShowMap(!showMap)}
             style={{
               padding: "4px 8px",

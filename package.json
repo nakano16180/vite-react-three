@@ -11,7 +11,10 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.29.1-dev132.0",
@@ -26,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
+    "@playwright/test": "^1.61.1",
     "@types/maplibre-gl": "^1.13.2",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",

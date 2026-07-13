@@ -8,7 +8,7 @@ import prettierConfig from "eslint-config-prettier";
 import { globalIgnores } from "eslint/config";
 
 export default tseslint.config([
-  globalIgnores(["dist"]),
+  globalIgnores(["dist", ".emdash/**"]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [
@@ -27,6 +27,12 @@ export default tseslint.config([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+  },
+  {
+    files: ["playwright.config.ts"],
+    languageOptions: {
+      globals: globals.node,
     },
   },
 ]);

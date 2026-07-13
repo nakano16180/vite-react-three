@@ -37,13 +37,18 @@ function Workspace({
   onUpdateStroke,
 }: WorkspaceProps) {
   return (
-    <main style={{ flex: 1, padding: 12, minHeight: 0 }}>
-      <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <main data-testid="workspace" style={{ flex: 1, padding: 12, minHeight: 0 }}>
+      <div data-testid="canvas-workspace" style={{ position: "relative", width: "100%", height: "100%" }}>
         <div style={{ position: "absolute", inset: 0 }}>
           {showMap ? (
             <MapView visible={showMap} />
           ) : (
-            <Canvas orthographic camera={{ position: [0, 0, 100], zoom: 1 }} style={{ width: "100%", height: "100%" }}>
+            <Canvas
+              data-testid="drawing-canvas"
+              orthographic
+              camera={{ position: [0, 0, 100], zoom: 1 }}
+              style={{ width: "100%", height: "100%" }}
+            >
               <color attach="background" args={["#ffffff"]} />
               <ambientLight intensity={0.5} />
               <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
@@ -67,6 +72,7 @@ function Workspace({
 
         {loading && (
           <div
+            data-testid="loading-overlay"
             style={{
               position: "absolute",
               inset: 0,
@@ -80,7 +86,7 @@ function Workspace({
           </div>
         )}
         {!loading && !spatialLoaded && (
-          <div className="workspace-warning-overlay">
+          <div className="workspace-warning-overlay" data-testid="workspace-warning">
             spatial 拡張のロードに失敗しました。環境によっては利用できない場合があります。
             <br />
             その場合、保存・再描画が動作しません（コンソールのログをご確認ください）。
@@ -104,7 +110,7 @@ function Workspace({
 
 function StatusFooter({ opfsLoaded }: { opfsLoaded: boolean }) {
   return (
-    <footer style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
+    <footer data-testid="status-footer" style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
       {opfsLoaded ? (
         <span style={{ color: "#16a34a", marginRight: 8 }}>💾 データ永続化中 (OPFS)</span>
       ) : (
@@ -164,6 +170,7 @@ export default function App() {
 
   return (
     <div
+      data-testid="app-shell"
       style={{
         width: "100%",
         height: "100%",
