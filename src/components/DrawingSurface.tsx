@@ -120,7 +120,7 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
         />
       )}
       {hasPreviewTarget && hoverWorld && previewPtsPx.length >= 2 && (
-        <Html position={[hoverWorld[0], hoverWorld[1], 0.002]} center>
+        <Html position={[hoverWorld[0], hoverWorld[1], 0.002]} center style={{ pointerEvents: "none" }}>
           <div
             style={{
               padding: "2px 5px",

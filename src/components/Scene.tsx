@@ -68,7 +68,7 @@ export function Scene({ strokes, pcdFileContents, hideStrokes = false, showMeasu
                 )}
                 <Line points={s.points} color={s.color} lineWidth={s.width} />
                 {showMeasurements && s.measurementPosition && (
-                  <Html position={s.measurementPosition} center>
+                  <Html position={s.measurementPosition} center style={{ pointerEvents: "none" }}>
                     <div
                       style={{
                         padding: "2px 5px",
