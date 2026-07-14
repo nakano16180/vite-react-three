@@ -74,3 +74,17 @@ Validation options:
 - If canvas output is flaky, add stable test IDs or DOM-accessible state summaries rather than relying only on pixel snapshots.
 
 Before finishing a change that affects rendering, use Playwright screenshots when possible to confirm that the canvas is nonblank and that expected geometry appears in desktop and mobile viewport sizes.
+
+### Browser QA Notes
+
+- Use `.codex-artifacts/` for local QA screenshots, reports, and temporary browser-debug artifacts. This directory is ignored by git.
+- For Windows Chrome CDP QA, use a user-launched Chrome with `--remote-debugging-port=9222` and connect to `http://localhost:9222` or `http://127.0.0.1:9222`.
+- When investigating drawing preview behavior, prefer slow pointer reproduction:
+  1. Reload the existing app tab.
+  2. Select Draw mode.
+  3. Click the first point.
+  4. Move the mouse slowly across the canvas.
+  5. Capture the in-progress preview before the second click.
+  6. Click the second point and capture the confirmed line.
+- While reproducing canvas bugs, record `console.error`, `console.warn`, `pageerror`, `requestfailed`, and relevant screenshots.
+- For R3F/WebGL output, prefer canvas screenshots over DOM-only assertions.
