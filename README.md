@@ -1,8 +1,8 @@
-# Vite React Three Drawing App
+# DuckDB Spatial Geometry Workbench
 
-A browser-based drawing and measurement prototype built with Vite, React, TypeScript, React Three Fiber, DuckDB WASM, and MapLibre.
+A browser-based geometry drawing and measurement workbench built with Vite, React, TypeScript, React Three Fiber, and DuckDB WASM.
 
-The app lets you draw lines and polygons on a 2D Three.js canvas, persist them in DuckDB, measure length/area/perimeter, edit saved points, load PCD point-cloud files, and switch to a Tokyo-centered map view.
+The app lets you draw lines and polygons on a 2D Three.js canvas, persist them in DuckDB, measure length/area/perimeter, edit saved points, and import or export GeoJSON.
 
 ## Features
 
@@ -13,8 +13,7 @@ The app lets you draw lines and polygons on a 2D Three.js canvas, persist them i
 - Pan mode: pan and zoom the orthographic canvas.
 - DuckDB WASM persistence with OPFS when available.
 - DuckDB spatial extension support with JSON-table fallback.
-- PCD file loading and rendering.
-- MapLibre map view using OpenStreetMap Japan styling.
+- GeoJSON import and export.
 
 ## Requirements
 
@@ -62,9 +61,8 @@ npm run preview
 - `src/App.tsx`: app state, DuckDB initialization, persistence, and mode switching.
 - `src/components/Header.tsx`: toolbar controls.
 - `src/components/DrawingSurface.tsx`: canvas drawing interactions.
-- `src/components/Scene.tsx`: stroke, measurement, polygon, and PCD rendering.
+- `src/components/Scene.tsx`: stroke, measurement, and polygon rendering.
 - `src/components/StrokeEditor.tsx`: point editing.
-- `src/components/MapView.tsx`: MapLibre map display.
 - `src/lib/geometry.ts`: geometry calculations.
 - `src/dbBundles.ts`: manually bundled DuckDB WASM assets.
 
@@ -81,7 +79,7 @@ The Vite dev server sends cross-origin isolation headers required by some DuckDB
 
 ## Testing
 
-There is no committed automated test runner yet. For current validation, run:
+For current validation, run:
 
 ```sh
 npm run lint
@@ -92,7 +90,7 @@ Good next steps for automated coverage:
 
 - Add unit tests for `src/lib/geometry.ts`.
 - Add tests for geometry serialization and persistence behavior.
-- Add Playwright tests for draw, edit, measure, pan, undo, clear, and PCD-loading workflows.
+- Extend Playwright coverage for draw, edit, measure, pan, undo, clear, and GeoJSON workflows.
 
 Playwright can test canvas drawing by using fixed pointer coordinates relative to the canvas bounding box. This app's drawing flow is click-based:
 

@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { useThree } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
-import { PCDFromFile } from "./PCDLoader";
 import { getCentroid } from "../lib/geometry";
 
 interface Stroke {
@@ -18,12 +17,11 @@ interface Stroke {
 
 interface SceneProps {
   strokes: Stroke[];
-  pcdFileContents: string[];
   hideStrokes?: boolean;
   showMeasurements?: boolean;
 }
 
-export function Scene({ strokes, pcdFileContents, hideStrokes = false, showMeasurements = false }: SceneProps) {
+export function Scene({ strokes, hideStrokes = false, showMeasurements = false }: SceneProps) {
   const { size, viewport } = useThree();
 
   const renderedStrokes = useMemo(() => {
@@ -96,9 +94,6 @@ export function Scene({ strokes, pcdFileContents, hideStrokes = false, showMeasu
             )}
           </group>
         ))}
-      {pcdFileContents.map((content, index) => (
-        <PCDFromFile key={`pcd-${index}`} fileContent={content} pointSize={0.5} />
-      ))}
     </group>
   );
 }

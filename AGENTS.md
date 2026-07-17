@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-This is a Vite + React + TypeScript app for drawing and measuring 2D geometry on a React Three Fiber canvas. It stores drawn strokes in DuckDB WASM, uses the DuckDB spatial extension when available, can display point clouds from PCD files, and can switch to a MapLibre map view.
+This is a Vite + React + TypeScript app for drawing and measuring 2D geometry on a React Three Fiber canvas. It stores drawn strokes in DuckDB WASM and uses the DuckDB spatial extension when available.
 
 Core files:
 
 - `src/App.tsx`: application state, DuckDB setup, persistence, mode wiring.
 - `src/components/DrawingSurface.tsx`: click-based line and polygon drawing on the R3F canvas.
-- `src/components/Scene.tsx`: renders saved strokes, filled polygons, measurements, and PCD content.
+- `src/components/Scene.tsx`: renders saved strokes, filled polygons, and measurements.
 - `src/components/StrokeEditor.tsx`: edit mode for dragging existing stroke points.
 - `src/components/Header.tsx`: toolbar controls.
 - `src/lib/geometry.ts`: pure geometry helpers for length, area, perimeter, centroid, and polygon closing.
@@ -30,8 +30,8 @@ The Vite dev server sets `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder
 - Keep coordinate storage in pixel coordinates (`Point2D`) unless changing the persistence model intentionally.
 - Preserve the fallback JSON table path for environments where the DuckDB spatial extension cannot load.
 - Prefer extending `src/lib/geometry.ts` for pure geometry behavior and test those helpers directly when a test runner is added.
-- Avoid unrelated UI refactors when changing drawing, measurement, persistence, or map behavior.
-- When changing canvas interactions, verify draw, edit, measure, pan, undo, clear, refresh, and PCD loading paths as applicable.
+- Avoid unrelated UI refactors when changing drawing, measurement, or persistence behavior.
+- When changing canvas interactions, verify draw, edit, measure, pan, undo, clear, refresh, and GeoJSON import/export paths as applicable.
 
 ## Testing Guidance
 
