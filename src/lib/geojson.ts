@@ -10,6 +10,7 @@ import {
   type Layer,
   type Point2D,
 } from "../domain/geometryFeature";
+import { createId } from "./id";
 
 export interface ImportedGeoJSON {
   features: GeometryFeature[];
@@ -125,8 +126,8 @@ const readProperties = (value: unknown, stripLegacyTransportFields: boolean): Re
 };
 
 const uniqueId = (requested: unknown, usedIds: Set<string>): string => {
-  let id = typeof requested === "string" && requested.length > 0 ? requested : crypto.randomUUID();
-  while (usedIds.has(id)) id = crypto.randomUUID();
+  let id = typeof requested === "string" && requested.length > 0 ? requested : createId();
+  while (usedIds.has(id)) id = createId();
   usedIds.add(id);
   return id;
 };

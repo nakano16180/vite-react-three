@@ -1,3 +1,5 @@
+import { createId } from "../lib/id";
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type Point2D = [number, number];
@@ -86,7 +88,7 @@ const normalizeGeometry = (geometry: FeatureGeometry): FeatureGeometry => {
 };
 
 export const createGeometryFeature = (input: CreateGeometryFeatureInput): GeometryFeature => ({
-  id: input.id ?? crypto.randomUUID(),
+  id: input.id ?? createId(),
   geometry: normalizeGeometry(input.geometry),
   properties: input.properties ?? {},
   style: input.style ?? createDefaultStyle(),
