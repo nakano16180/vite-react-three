@@ -184,7 +184,7 @@ export class GeometryRepository {
         );
       `);
     }
-    await this.insertMetadataIfAbsent("active_feature_store", this.capabilities.store);
+    await this.initializeActiveStore();
     await this.insertLayers([DEFAULT_LAYER], true);
 
     await this.connection.query("BEGIN TRANSACTION;");
@@ -437,6 +437,22 @@ export class GeometryRepository {
       return;
     }
     if (version !== CURRENT_SCHEMA_VERSION) throw new Error(`Unsupported schema version: ${version}`);
+  }
+
+  private async initializeActiveStore(): Promise<void> {
+    const stored = await this.metadataValue("active_feature_store");
+    if (stored === undefined) {
+      await this.insertMetadataIfAbsent("active_feature_store", this.capabilities.store);
+      return;
+    }
+    if (stored !== "spatial" && stored !== "json") {
+      throw new Error(`Unsupported active feature store: ${stored}`);
+    }
+    if (stored !== this.capabilities.store) {
+      throw new Error(
+        `Active feature store mismatch: database uses ${stored}, but runtime selected ${this.capabilities.store}.`
+      );
+    }
   }
 
   private async assertLayerExists(layerId: string): Promise<void> {

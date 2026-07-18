@@ -445,6 +445,54 @@ describe("schema metadata", () => {
     expect(String(query.mock.calls[0][0])).not.toContain("features");
     expect(metadataWrite).not.toHaveBeenCalled();
   });
+
+  it("schema gate後にnew DBのactive storeをpersistする", async () => {
+    const metadata = new Map<string, string>();
+    const connection = {
+      query: vi.fn().mockResolvedValue(result()),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.startsWith("INSERT INTO app_metadata")) metadata.set(String(args[0]), String(args[1]));
+          if (sql.includes("information_schema.tables")) return result();
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize();
+
+    expect(metadata.get("active_feature_store")).toBe("json");
+  });
+
+  it("既存active storeとcapabilities.store不一致はfail closedする", async () => {
+    const metadata = new Map<string, string>([
+      ["schema_version", String(CURRENT_SCHEMA_VERSION)],
+      ["active_feature_store", "spatial"],
+    ]);
+    const query = vi.fn().mockResolvedValue(result());
+    const connection = {
+      query,
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await expect(
+      new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
+    ).rejects.toThrow("Active feature store mismatch");
+  });
 });
 
 describe("legacy migration row isolation", () => {

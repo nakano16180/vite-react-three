@@ -37,17 +37,6 @@ const readActiveStore = async (connection: duckdb.AsyncDuckDBConnection): Promis
   }
 };
 
-const writeActiveStore = async (connection: duckdb.AsyncDuckDBConnection, store: FeatureStore): Promise<void> => {
-  const statement = await connection.prepare(
-    "INSERT INTO app_metadata(key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING;"
-  );
-  try {
-    await statement.query("active_feature_store", store);
-  } finally {
-    await statement.close();
-  }
-};
-
 export const bootstrapDuckDB = async (
   db: BootstrapDatabase,
   selectedBundle: typeof bundle = bundle
@@ -85,7 +74,6 @@ export const bootstrapDuckDB = async (
     const stored = await readActiveStore(connection);
     if (stored === "spatial" && !spatial) throw new StoredFeatureStoreUnavailableError();
     const store = stored ?? (spatial ? "spatial" : "json");
-    if (!stored) await writeActiveStore(connection, store);
 
     return { db: db as duckdb.AsyncDuckDB, connection, capabilities: { opfs, spatial, store } };
   } catch (error) {
