@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "fixture-line",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [100, 100],
+          [240, 180]
+        ]
+      },
+      "properties": {
+        "name": "Fixture road",
+        "rank": 2
+      },
+      "workbench": {
+        "style": {
+          "strokeColor": "#e11d48",
+          "strokeWidth": 5
+        },
+        "layerId": "default",
+        "createdAt": "2026-07-18T00:00:00.000Z"
+      }
+    }
+  ],
+  "workbench": {
+    "layers": [
+      {
+        "id": "default",
+        "name": "Default",
+        "visible": true,
+        "order": 0,
+        "createdAt": "1970-01-01T00:00:00.000Z"
+      }
+    ]
+  }
+}

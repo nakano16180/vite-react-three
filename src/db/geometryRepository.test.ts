@@ -6,8 +6,14 @@ import {
   createGeometryFeature,
   type FeatureGeometry,
 } from "../domain/geometryFeature";
-import { mapSpatialFeatureRow, mergeLegacyFeatures, mapJsonFeatureRow, mapLegacyJsonRow } from "./geometryRepository";
-import { GeometryRepository } from "./geometryRepository";
+import {
+  GeometryRepository,
+  PersistenceCheckpointError,
+  mapSpatialFeatureRow,
+  mergeLegacyFeatures,
+  mapJsonFeatureRow,
+  mapLegacyJsonRow,
+} from "./geometryRepository";
 
 describe("geometry repository row mapping", () => {
   it("JSON store rowをcanonical featureへ変換する", () => {
@@ -256,5 +262,105 @@ describe("transactional GeoJSON import", () => {
     await expect(repository.importGeoJSON([DEFAULT_LAYER], [feature])).rejects.toThrow("feature insert failed");
     expect(connection.query).toHaveBeenCalledWith("ROLLBACK;");
     expect(connection.query).not.toHaveBeenCalledWith("COMMIT;");
+  });
+});
+
+describe("OPFS durability", () => {
+  const feature = createGeometryFeature({
+    id: "durable-1",
+    geometry: {
+      type: "LineString",
+      coordinates: [
+        [0, 0],
+        [1, 1],
+      ],
+    },
+  });
+
+  it("feature insert完了前にCHECKPOINTをawaitする", async () => {
+    const checkpoint = vi.fn().mockResolvedValue({ toArray: () => [] });
+    const connection = {
+      query: checkpoint,
+      prepare: vi.fn().mockResolvedValue({
+        query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: true,
+      spatial: false,
+      store: "json",
+    });
+
+    await repository.insertFeature(feature);
+
+    expect(checkpoint).toHaveBeenCalledOnce();
+    expect(checkpoint).toHaveBeenCalledWith("CHECKPOINT;");
+  });
+
+  it("GeoJSON importはCOMMIT後に一度だけCHECKPOINTする", async () => {
+    const query = vi.fn().mockResolvedValue({ toArray: () => [] });
+    const connection = {
+      query,
+      prepare: vi.fn().mockResolvedValue({
+        query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: true,
+      spatial: false,
+      store: "json",
+    });
+
+    await repository.importGeoJSON([DEFAULT_LAYER], [feature]);
+
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual(["BEGIN TRANSACTION;", "COMMIT;", "CHECKPOINT;"]);
+  });
+
+  it("CHECKPOINT失敗は書込み成功を明示するdiagnostic errorにする", async () => {
+    const connection = {
+      query: vi.fn().mockRejectedValue(new Error("disk full")),
+      prepare: vi.fn().mockResolvedValue({
+        query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: true,
+      spatial: false,
+      store: "json",
+    });
+
+    await expect(repository.insertFeature(feature)).rejects.toEqual(
+      expect.objectContaining<PersistenceCheckpointError>({
+        name: "PersistenceCheckpointError",
+        message: expect.stringContaining("write succeeded"),
+      })
+    );
+  });
+
+  it("migration COMMIT後のCHECKPOINT失敗はrollbackせずwarningを返す", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql === "CHECKPOINT;") throw new Error("quota exceeded");
+      return { toArray: () => [] };
+    });
+    const connection = {
+      query,
+      prepare: vi.fn().mockResolvedValue({
+        query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: true,
+      spatial: false,
+      store: "json",
+    });
+
+    await expect(repository.initialize()).resolves.toEqual({
+      migrationWarning: expect.stringContaining("write succeeded"),
+    });
+    expect(query).not.toHaveBeenCalledWith("ROLLBACK;");
   });
 });

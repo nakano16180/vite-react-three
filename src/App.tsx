@@ -115,7 +115,7 @@ function StatusFooter({ storageStatus }: { storageStatus: StorageStatus }) {
   const persistenceLabel = storageStatus.opfs ? "永続ストレージ" : "一時ストレージ";
   return (
     <footer data-testid="status-footer" style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
-      <span style={{ color: storageStatus.opfs ? "#16a34a" : "#b45309", marginRight: 8 }}>
+      <span data-testid="storage-status" style={{ color: storageStatus.opfs ? "#16a34a" : "#b45309", marginRight: 8 }}>
         {persistenceLabel}: {storageLabel} / {engineLabel}
       </span>
       Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Measure モード: 長さ・面積・周長を表示 | Edit

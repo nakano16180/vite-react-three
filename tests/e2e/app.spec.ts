@@ -26,6 +26,8 @@ test.describe("drawing workspace", () => {
     await expect(page.getByRole("button", { name: "Draw" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("drawing-canvas")).toBeVisible();
     await expect(page.getByTestId("status-footer")).toContainText("Draw モード");
+    await expect(page.getByTestId("storage-status")).toContainText(/OPFS|メモリ/);
+    await expect(page.getByTestId("storage-status")).toContainText(/Spatial|JSON fallback/);
   });
 
   test("focuses the workspace on DuckDB spatial drawing controls", async ({ page }) => {
@@ -50,5 +52,31 @@ test.describe("drawing workspace", () => {
     await page.getByRole("button", { name: "Measure" }).click();
     await expect(page.getByRole("button", { name: "Measure" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("保存したlineをrefreshとreload後に復元する", async ({ page }) => {
+    test.setTimeout(90_000);
+    await gotoApp(page);
+    const box = await getCanvasBox(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    await page.mouse.click(box.x + 100, box.y + 100);
+    await page.mouse.click(box.x + 240, box.y + 180);
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Measure" }).click();
+    await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
+
+    const status = page.getByTestId("storage-status");
+    if ((await status.textContent())?.includes("OPFS")) {
+      await page.reload();
+      await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Measure" }).click();
+      await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
+    }
+
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByText(/Length: \d+\.\d px/)).toHaveCount(0);
   });
 });

@@ -15,6 +15,15 @@ import type { DuckDBCapabilities } from "./createDuckDB";
 
 type Row = Record<string, unknown>;
 
+export class PersistenceCheckpointError extends Error {
+  constructor(cause: unknown) {
+    super(`OPFS write succeeded, but CHECKPOINT failed: ${cause instanceof Error ? cause.message : String(cause)}`, {
+      cause,
+    });
+    this.name = "PersistenceCheckpointError";
+  }
+}
+
 export interface JsonFeatureRow extends Row {
   id: unknown;
   geom_type: unknown;
@@ -167,9 +176,10 @@ export class GeometryRepository {
       `);
     }
     await this.insertMetadataIfAbsent("active_feature_store", this.capabilities.store);
-    await this.insertLayers([DEFAULT_LAYER]);
+    await this.insertLayers([DEFAULT_LAYER], true);
 
     await this.connection.query("BEGIN TRANSACTION;");
+    let committed = false;
     try {
       const migrated = await this.metadataValue("legacy_strokes_migrated");
       if (migrated !== "true") {
@@ -201,13 +211,20 @@ export class GeometryRepository {
           }
         }
         for (const feature of mergeLegacyFeatures(jsonFeatures, spatialFeatures)) {
-          await this.insertFeature(feature, true);
+          await this.insertFeature(feature, true, true);
         }
         await this.setMetadata("legacy_strokes_migrated", "true");
       }
       await this.connection.query("COMMIT;");
+      committed = true;
+      await this.checkpoint();
       return {};
     } catch (error) {
+      if (committed) {
+        return {
+          migrationWarning: error instanceof Error ? error.message : String(error),
+        };
+      }
       try {
         await this.connection.query("ROLLBACK;");
       } catch {
@@ -232,7 +249,7 @@ export class GeometryRepository {
     return rows.toArray().map((row) => mapJsonFeatureRow(row.toJSON() as JsonFeatureRow));
   }
 
-  async insertFeature(feature: GeometryFeature, ignoreConflict = false): Promise<void> {
+  async insertFeature(feature: GeometryFeature, ignoreConflict = false, deferCheckpoint = false): Promise<void> {
     const conflict = ignoreConflict ? " ON CONFLICT DO NOTHING" : "";
     const sql =
       this.capabilities.store === "spatial"
@@ -265,6 +282,7 @@ export class GeometryRepository {
     } finally {
       await statement.close();
     }
+    if (!deferCheckpoint) await this.checkpoint();
   }
 
   async updateGeometry(id: string, geometry: FeatureGeometry): Promise<void> {
@@ -277,16 +295,17 @@ export class GeometryRepository {
       } finally {
         await statement.close();
       }
-      return;
+    } else {
+      const statement = await this.connection.prepare(
+        "UPDATE features_json SET geom_type = ?, coordinates = CAST(? AS JSON) WHERE id = ?;"
+      );
+      try {
+        await statement.query(geometry.type, JSON.stringify(geometry.coordinates), id);
+      } finally {
+        await statement.close();
+      }
     }
-    const statement = await this.connection.prepare(
-      "UPDATE features_json SET geom_type = ?, coordinates = CAST(? AS JSON) WHERE id = ?;"
-    );
-    try {
-      await statement.query(geometry.type, JSON.stringify(geometry.coordinates), id);
-    } finally {
-      await statement.close();
-    }
+    await this.checkpoint();
   }
 
   async deleteLatestFeature(): Promise<void> {
@@ -294,10 +313,12 @@ export class GeometryRepository {
     await this.connection.query(
       `DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} ORDER BY created_at DESC, id DESC LIMIT 1);`
     );
+    await this.checkpoint();
   }
 
   async clearFeatures(): Promise<void> {
     await this.connection.query(`DELETE FROM ${this.capabilities.store === "spatial" ? "features" : "features_json"};`);
+    await this.checkpoint();
   }
 
   async listLayers(): Promise<Layer[]> {
@@ -316,7 +337,7 @@ export class GeometryRepository {
     });
   }
 
-  async insertLayers(layers: Layer[]): Promise<void> {
+  async insertLayers(layers: Layer[], deferCheckpoint = false): Promise<void> {
     const statement = await this.connection.prepare(
       `INSERT INTO layers(id, name, visible, sort_order, created_at)
        VALUES (?, ?, ?, ?, CAST(? AS TIMESTAMP)) ON CONFLICT DO NOTHING;`
@@ -328,13 +349,14 @@ export class GeometryRepository {
     } finally {
       await statement.close();
     }
+    if (!deferCheckpoint) await this.checkpoint();
   }
 
   async importGeoJSON(layers: Layer[], features: GeometryFeature[]): Promise<void> {
     await this.connection.query("BEGIN TRANSACTION;");
     try {
-      await this.insertLayers(layers);
-      for (const feature of features) await this.insertFeature(feature);
+      await this.insertLayers(layers, true);
+      for (const feature of features) await this.insertFeature(feature, false, true);
       await this.connection.query("COMMIT;");
     } catch (error) {
       try {
@@ -343,6 +365,16 @@ export class GeometryRepository {
         // Preserve the import failure; rollback is best-effort.
       }
       throw error;
+    }
+    await this.checkpoint();
+  }
+
+  private async checkpoint(): Promise<void> {
+    if (!this.capabilities.opfs) return;
+    try {
+      await this.connection.query("CHECKPOINT;");
+    } catch (error) {
+      throw new PersistenceCheckpointError(error);
     }
   }
 

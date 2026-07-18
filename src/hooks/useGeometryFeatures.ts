@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createDuckDB, type DuckDBContext, type FeatureStore } from "../db/createDuckDB";
-import { GeometryRepository } from "../db/geometryRepository";
+import { GeometryRepository, PersistenceCheckpointError } from "../db/geometryRepository";
 import {
   DEFAULT_LAYER_ID,
   createGeometryFeature,
@@ -114,7 +114,16 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
           return loaded;
         } catch (error) {
           if (generationRef.current === generation && repositoryRef.current === repository) {
-            setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
+            if (error instanceof PersistenceCheckpointError) {
+              await loadRepositoryState(repository, generation);
+              setStorageStatus((current) => ({
+                ...current,
+                migrationWarning: errorMessage(error),
+                error: undefined,
+              }));
+            } else {
+              setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
+            }
           }
           return false;
         }
