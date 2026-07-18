@@ -11,7 +11,7 @@ import {
 } from "../domain/geometryFeature";
 import { simplifyFeatureGeometry, toRenderableStroke } from "../domain/renderableStroke";
 import { exportFeatureCollection } from "../lib/geojson";
-import { importGeometryFeatures } from "../lib/importGeometryFeatures";
+import { importGeometryFeaturesWithContext } from "../lib/importGeometryFeatures";
 import { createPromiseQueue } from "../lib/promiseQueue";
 
 export type GeometryType = "line" | "polygon";
@@ -183,12 +183,8 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       let warnings: string[] = [];
       await runRepositoryAction(
         async (repository) => {
-          try {
-            const imported = await importGeometryFeatures(repository, () => file.text());
-            warnings = imported.warnings;
-          } catch (error) {
-            throw new Error(`GeoJSON import failed: ${errorMessage(error)}`);
-          }
+          const imported = await importGeometryFeaturesWithContext(repository, () => file.text());
+          warnings = imported.warnings;
         },
         () => {
           if (warnings.length > 0) {

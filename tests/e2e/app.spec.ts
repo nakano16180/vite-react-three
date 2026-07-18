@@ -69,12 +69,11 @@ test.describe("drawing workspace", () => {
     await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
 
     const status = page.getByTestId("storage-status");
-    if ((await status.textContent())?.includes("OPFS")) {
-      await page.reload();
-      await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
-      await page.getByRole("button", { name: "Measure" }).click();
-      await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
-    }
+    await expect(status).toContainText("OPFS");
+    await page.reload();
+    await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Measure" }).click();
+    await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
 
     await page.getByRole("button", { name: "Undo" }).click();
     await expect(page.getByText(/Length: \d+\.\d px/)).toHaveCount(0);

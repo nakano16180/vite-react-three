@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { PersistenceCheckpointError } from "../db/geometryRepository";
 import { createGeometryFeature, type GeometryFeature, type Layer } from "../domain/geometryFeature";
 import { createPromiseQueue } from "./promiseQueue";
-import { importGeometryFeatures } from "./importGeometryFeatures";
+import { importGeometryFeatures, importGeometryFeaturesWithContext } from "./importGeometryFeatures";
 
 const geoJSON = (id: string) =>
   JSON.stringify({
@@ -91,5 +92,28 @@ describe("importGeometryFeatures", () => {
     await importGeometryFeatures(repository, async () => geoJSON("existing"));
 
     expect(repository.features.at(-1)?.id).not.toBe("existing");
+  });
+
+  it("PersistenceCheckpointErrorのidentityを保持してrethrowする", async () => {
+    const checkpointError = new PersistenceCheckpointError(new Error("quota exceeded"));
+    const repository = {
+      listFeatures: vi.fn().mockResolvedValue([]),
+      importGeoJSON: vi.fn().mockRejectedValue(checkpointError),
+    };
+
+    await expect(importGeometryFeaturesWithContext(repository, async () => geoJSON("durable"))).rejects.toBe(
+      checkpointError
+    );
+  });
+
+  it("parse errorにはGeoJSON import contextを付ける", async () => {
+    const repository = {
+      listFeatures: vi.fn().mockResolvedValue([]),
+      importGeoJSON: vi.fn(),
+    };
+
+    await expect(importGeometryFeaturesWithContext(repository, async () => "{")).rejects.toThrow(
+      "GeoJSON import failed:"
+    );
   });
 });
