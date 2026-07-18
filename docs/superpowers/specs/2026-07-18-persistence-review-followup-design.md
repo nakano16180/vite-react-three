@@ -1,64 +1,64 @@
-# Persistence Review Follow-up Design
+# 永続化レビュー追加対応 設計書
 
-## Goal
+## 目的
 
-Resolve the six unresolved review threads on PR #36 without changing the canonical geometry model or the sticky Spatial/JSON store policy.
+canonical geometry modelおよびSpatial/JSON storeのsticky選択方針を維持したまま、PR #36に残っている6件の未解決レビュー指摘へ対応する。
 
-## Export consistency
+## Exportの整合性
 
-GeoJSON export must use repository state observed after all previously queued repository operations finish. The export handler will keep the existing initialization guard, enqueue an export operation on the same promise queue used by draw, import, undo, clear, and refresh, then load features and layers directly from the active repository before creating the download.
+GeoJSON Exportでは、先にqueueへ登録されたrepository操作がすべて完了した後のrepository stateを使用しなければならない。既存の初期化完了ガードは維持する。Export処理をdraw、import、undo、clear、refreshと同じpromise queueへ登録し、実行時にactive repositoryからfeatureとlayerを直接読み直してからdownloadを生成する。
 
-This prevents both empty exports during initialization and stale exports immediately after a queued mutation. Export remains read-only and does not trigger a checkpoint.
+これにより、初期化中の空Exportと、mutationをqueueへ登録した直後の古いstateによるExportの両方を防ぐ。Exportはread-only操作とし、checkpointは実行しない。
 
-## Legacy migration state
+## legacy migrationの状態管理
 
-Legacy JSON and Spatial sources will have independent migration metadata:
+legacy JSON sourceとSpatial sourceについて、次のmetadataでmigration状態を個別に管理する。
 
 - `legacy_strokes_json_migrated`
 - `legacy_strokes_spatial_migrated`
 
-Each available source is migrated once and marked complete in the same transaction as its feature inserts. A missing legacy table counts as complete for that source. A present Spatial table remains pending while Spatial functions are unavailable, without causing completed JSON migration to replay.
+利用可能なsourceは一度だけ移行し、featureのinsertと同じtransaction内で完了markerを設定する。対応するlegacy tableが存在しない場合、そのsourceは完了として扱う。Spatial tableが存在してもSpatial functionを利用できない場合、Spatial側はpendingのままとする。この状態でも完了済みのJSON migrationは次回起動時に再実行しない。
 
-The existing `legacy_strokes_migrated` key remains as compatibility metadata. Existing databases with that key set to `true` are treated as fully migrated. New initialization sets it after both source-specific states are complete.
+既存の`legacy_strokes_migrated` keyは互換用metadataとして残す。この値が`true`の既存databaseは、両sourceとも移行済みとして扱う。新しい初期化処理では、source別の両状態が完了した後にこのkeyも設定する。
 
-Spatial rows continue to take precedence over JSON rows with the same ID when both sources are migrated together. If JSON was migrated in an earlier non-Spatial session, later Spatial migration replaces a same-ID JSON-derived feature so the precedence rule remains true.
+両sourceを同時に移行する場合、同一IDでは従来どおりSpatial rowをJSON rowより優先する。Spatialを利用できないsessionでJSON側を先に移行した後、別のsessionでSpatial側を移行する場合も、同一IDのJSON由来featureをSpatial rowで置換し、優先規則を維持する。
 
-## Stable insertion order and Undo
+## 安定した挿入順とUndo
 
-Schema version 3 adds `insertion_order BIGINT` to the active feature table. It is the canonical operation-order field used by Undo; `created_at` remains canonical user data and `inserted_at` remains available only for schema migration compatibility.
+schema version 3でactive feature tableへ`insertion_order BIGINT`を追加する。Undoが使用する正式な操作順序fieldは`insertion_order`とする。`created_at`はcanonicalなuser dataとして維持し、`inserted_at`はschema migrationの互換用途にのみ残す。
 
-Every feature insert allocates the next integer order inside the repository transaction. Multi-feature imports therefore receive increasing values in file order even when they share a transaction timestamp. Undo deletes the highest `insertion_order`.
+すべてのfeature insertで、repository transaction内における次の整数orderを割り当てる。これにより、複数featureのimportでも、同じtransaction timestampを持つかどうかにかかわらずfile内の順序どおりに増加する値を得られる。Undoは最大の`insertion_order`を持つfeatureを削除する。
 
-When upgrading schema version 2, existing rows receive deterministic consecutive orders based on `inserted_at ASC, id ASC`. Schema version 1 first gains `inserted_at` as required by the existing migration, then receives insertion orders using the same rule. The schema version is updated only after the active table is fully migrated.
+schema version 2からのupgradeでは、既存rowへ`inserted_at ASC, id ASC`の順で決定的な連番を割り当てる。schema version 1では、既存migrationどおり先に`inserted_at`を追加し、その後に同じ規則で`insertion_order`を割り当てる。active tableのmigrationがすべて完了した後にだけschema versionを更新する。
 
-## Clear semantics and layers
+## Clearの意味とlayer
 
-Clear is a transaction that deletes all features and all non-Default layers. The Default layer remains available. The checkpoint occurs after commit; failures before commit roll back both deletions.
+Clearは、すべてのfeatureとDefault以外の全layerを削除するtransactionとする。Default layerは残す。checkpointはcommit後に実行し、commit前に失敗した場合は両方の削除をrollbackする。
 
-Layer import keeps the existing conflict behavior because Clear now removes stale imported layers. Existing layer definitions are not silently overwritten by an unrelated import unless the user clears first.
+Clearによって古いimport済みlayerを削除するため、layer importの既存のconflict処理は維持する。ユーザーが先にClearしない限り、関係のないimportによって既存layer定義を暗黙に上書きしない。
 
-## Error handling
+## エラー処理
 
-Queued export failures surface through the existing storage error state and never create a partial download. Repository generation checks prevent an export queued for an obsolete DuckDB instance from updating current UI state.
+queueへ登録したExportが失敗した場合は、既存のstorage error stateへ表示し、不完全なdownloadを生成しない。repository generationを検証し、古いDuckDB instance用にqueueへ登録されたExportが現在のUI stateを更新しないようにする。
 
-Migration failures before commit roll back source markers and feature changes together. A checkpoint failure after commit remains a durability warning and does not cause a completed source migration to replay in the current database state.
+migrationがcommit前に失敗した場合は、source markerとfeature変更を同じtransactionでrollbackする。commit後のcheckpoint failureは従来どおりdurability warningとして扱い、現在のdatabase stateで完了済みsourceのmigrationを再実行しない。
 
-## Testing
+## テスト
 
-Test-driven changes will cover:
+テスト駆動で次のケースを追加する。
 
-- Export waits for a pending repository mutation and reads fresh repository state.
-- JSON legacy migration is not replayed while Spatial migration remains pending.
-- Later Spatial migration replaces a same-ID JSON legacy feature.
-- Multi-feature import assigns monotonic insertion order and Undo removes the last imported feature.
-- Schema versions 1 and 2 migrate deterministically to version 3.
-- Clear removes features and custom layers atomically while preserving the Default layer.
+- Exportがpending中のrepository mutationを待ち、最新のrepository stateを読み取る。
+- Spatial migrationがpendingでも、完了済みのJSON legacy migrationを再実行しない。
+- 後から実行したSpatial migrationが、同一IDのJSON legacy featureを置換する。
+- 複数featureのimportで単調増加する挿入順を割り当て、Undoが最後にimportしたfeatureを削除する。
+- schema version 1および2からversion 3へ決定的にmigrationする。
+- Clearがfeatureとcustom layerをtransactionalに削除し、Default layerを維持する。
 
-The final verification set is `npm run test`, `npm run lint`, `npm run format:check`, and `npm run build`. Relevant Playwright tests will also run when the export behavior can be exercised deterministically in the browser harness.
+最終検証では`npm run test`、`npm run lint`、`npm run format:check`、`npm run build`を実行する。Export動作をbrowser harnessで決定的に再現できる場合は、関連するPlaywright testも実行する。
 
-## Scope boundaries
+## 対象外
 
-- Do not change coordinate storage, canonical GeoJSON structure, or active store selection.
-- Do not delete legacy tables.
-- Do not modify the unrelated untracked `ROADMAP.md`.
-- Do not reply to or resolve GitHub review threads without explicit authorization.
+- coordinate storage、canonical GeoJSON構造、active store選択は変更しない。
+- legacy tableは削除しない。
+- 無関係な未追跡fileである`ROADMAP.md`は変更しない。
+- 明示的な許可なしにGitHubのreview threadへ返信したり、threadをresolveしたりしない。
