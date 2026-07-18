@@ -11,9 +11,14 @@ The app lets you draw lines and polygons on a 2D Three.js canvas, persist them i
 - Measure mode: displays line length or polygon area/perimeter.
 - Edit mode: move saved stroke points.
 - Pan mode: pan and zoom the orthographic canvas.
-- DuckDB WASM persistence with OPFS when available.
-- DuckDB spatial extension support with JSON-table fallback.
-- GeoJSON import and export.
+- A canonical `GeometryFeature` model keeps geometry, arbitrary JSON properties, style, layer membership, and
+  creation time independent of the active database table.
+- New and legacy features belong to the built-in visible `Default` layer unless valid layer metadata specifies
+  another layer.
+- DuckDB WASM persistence uses OPFS when available and an in-memory database otherwise.
+- DuckDB Spatial storage is used when available, with a JSON-table feature store as the non-Spatial fallback.
+- GeoJSON import and export preserve feature properties and workbench metadata for style, layer, creation time, and
+  referenced layers.
 
 ## Requirements
 
@@ -54,23 +59,57 @@ npm run preview
 - `npm run lint:fix`: run ESLint with automatic fixes.
 - `npm run format`: format files with Prettier.
 - `npm run format:check`: check Prettier formatting.
+- `npm run test`: run the Vitest unit suite once.
+- `npm run test:watch`: run Vitest in watch mode.
+- `npm run test:e2e`: run the Playwright end-to-end suite.
+- `npm run test:e2e:headed`: run Playwright with a visible browser.
+- `npm run test:e2e:ui`: open the Playwright test UI.
 - `npm run preview`: preview the production build.
 
 ## App Structure
 
-- `src/App.tsx`: app state, DuckDB initialization, persistence, and mode switching.
+- `src/App.tsx`: application layout and mode wiring.
+- `src/domain/geometryFeature.ts`: canonical feature, geometry, style, and layer model.
+- `src/domain/renderableStroke.ts`: conversion from canonical features to rendering and measurement data.
+- `src/db/createDuckDB.ts`: DuckDB startup, capability detection, and active-store selection.
+- `src/db/geometryRepository.ts`: store-independent feature and layer persistence, migration, and transactions.
+- `src/hooks/useGeometryFeatures.ts`: React feature state and serialized repository operations.
 - `src/components/Header.tsx`: toolbar controls.
 - `src/components/DrawingSurface.tsx`: canvas drawing interactions.
-- `src/components/Scene.tsx`: stroke, measurement, and polygon rendering.
+- `src/components/Scene.tsx`: feature, measurement, and polygon rendering.
 - `src/components/StrokeEditor.tsx`: point editing.
-- `src/lib/geometry.ts`: geometry calculations.
+- `src/lib/geometry.ts`: geometry calculations and simplification primitives.
+- `src/lib/geojson.ts`: canonical GeoJSON import and export.
 - `src/dbBundles.ts`: manually bundled DuckDB WASM assets.
 
 ## DuckDB Notes
 
-The app attempts to open an OPFS-backed DuckDB database at `opfs://vite-react-three.duckdb`. If OPFS is unavailable, it falls back to an in-memory database.
+Database location and feature storage are separate capabilities, producing four normal runtime combinations:
 
-The app also attempts to install and load DuckDB's `spatial` extension. When the extension is unavailable, geometry is still stored in the JSON fallback table, but spatial-specific behavior may be limited.
+| Database | Active feature store | Behavior                                                                     |
+| -------- | -------------------- | ---------------------------------------------------------------------------- |
+| OPFS     | Spatial              | Durable database using the `features` table and DuckDB geometry values.      |
+| OPFS     | JSON fallback        | Durable database using the `features_json` table and JSON coordinates.       |
+| Memory   | Spatial              | Session-only database using the `features` table and DuckDB geometry values. |
+| Memory   | JSON fallback        | Session-only database using the `features_json` table and JSON coordinates.  |
+
+The app first attempts to open `opfs://vite-react-three.duckdb`; if OPFS is unavailable, DuckDB continues in
+memory. It independently attempts to install and load the `spatial` extension.
+
+On first initialization, the selected feature store is recorded as `active_feature_store` in `app_metadata`.
+Subsequent sessions keep using that store so data does not silently split between the Spatial and JSON tables. If an
+existing database requires the Spatial store but the extension cannot be loaded, initialization reports an error
+instead of switching to JSON fallback.
+
+The repository creates the `Default` layer and transactionally migrates legacy `strokes_json` and `strokes` rows
+into canonical features once. Legacy colors and widths become canonical style, migrated features are assigned to
+the `Default` layer, and a Spatial row takes precedence when both legacy tables contain the same ID. Migration
+failures are surfaced as warnings and can be retried; successful OPFS writes are checkpointed for durability.
+
+GeoJSON exports standard `LineString` or `Polygon` geometry and leaves application properties in `properties`.
+Workbench-specific `style`, `layerId`, and `createdAt` values are stored in each feature's `workbench` member, while
+referenced layer definitions are stored in the collection-level `workbench.layers`. Import accepts this metadata,
+falls back to the `Default` layer and default/legacy style when needed, and skips unsupported features with warnings.
 
 The Vite dev server sends cross-origin isolation headers required by some DuckDB WASM configurations:
 
@@ -82,15 +121,15 @@ The Vite dev server sends cross-origin isolation headers required by some DuckDB
 For current validation, run:
 
 ```sh
+npm run test
+npm run test:e2e
 npm run lint
+npm run format:check
 npm run build
 ```
 
-Good next steps for automated coverage:
-
-- Add unit tests for `src/lib/geometry.ts`.
-- Add tests for geometry serialization and persistence behavior.
-- Extend Playwright coverage for draw, edit, measure, pan, undo, clear, and GeoJSON workflows.
+Vitest covers the canonical domain model, geometry conversion, GeoJSON codec, persistence behavior, migration, and
+operation queue. Playwright covers core application and GeoJSON workflows.
 
 Playwright can test canvas drawing by using fixed pointer coordinates relative to the canvas bounding box. This app's drawing flow is click-based:
 
