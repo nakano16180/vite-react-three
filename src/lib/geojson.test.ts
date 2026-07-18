@@ -51,6 +51,70 @@ describe("GeoJSON codec", () => {
     ]);
   });
 
+  it("3D LineString positionを2Dへ正規化する", () => {
+    const imported = importFeatureCollection({
+      type: "Feature",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [1, 2, 100],
+          [3, 4, 200],
+        ],
+      },
+      properties: {},
+    });
+
+    expect(imported.features[0].geometry).toEqual({
+      type: "LineString",
+      coordinates: [
+        [1, 2],
+        [3, 4],
+      ],
+    });
+  });
+
+  it("3D Polygon positionを2Dへ正規化して閉じ点を除去する", () => {
+    const imported = importFeatureCollection({
+      type: "Feature",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [0, 0, 10],
+            [4, 0, 20],
+            [4, 4, 30],
+            [0, 0, 10],
+          ],
+        ],
+      },
+      properties: {},
+    });
+
+    expect(imported.features[0].geometry).toEqual({
+      type: "Polygon",
+      coordinates: [
+        [0, 0],
+        [4, 0],
+        [4, 4],
+      ],
+    });
+  });
+
+  it.each([
+    ["2要素未満", [[0], [1, 1]]],
+    ["非数値", [[0, 0], ["x", 1]]],
+    ["非有限値", [[0, 0], [Number.POSITIVE_INFINITY, 1]]],
+  ])("%sのpositionを含むgeometryをwarning付きでskipする", (_label, coordinates) => {
+    const imported = importFeatureCollection({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates },
+      properties: {},
+    });
+
+    expect(imported.features).toEqual([]);
+    expect(imported.warnings).toHaveLength(1);
+  });
+
   it("legacy propertiesをstyleへ変換しreserved fieldを除く", () => {
     const imported = importFeatureCollection({
       type: "Feature",

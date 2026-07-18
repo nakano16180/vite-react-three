@@ -62,6 +62,17 @@ const isStyle = (value: unknown): value is FeatureStyle =>
 
 const copyPoint = ([x, y]: Point2D): Point2D => [x, y];
 
+const point2DFromPosition = (value: unknown): Point2D | null => {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  const [x, y] = value;
+  return typeof x === "number" &&
+    Number.isFinite(x) &&
+    typeof y === "number" &&
+    Number.isFinite(y)
+    ? [x, y]
+    : null;
+};
+
 export const exportFeatureCollection = (features: GeometryFeature[], layers: Layer[]): GeoJSONFeatureCollection => {
   const referencedLayerIds = new Set(features.map((feature) => feature.layerId));
   return {
@@ -94,18 +105,25 @@ export const exportFeatureCollection = (features: GeometryFeature[], layers: Lay
 
 const canonicalGeometry = (value: unknown): FeatureGeometry | null => {
   if (!isRecord(value) || !Array.isArray(value.coordinates)) return null;
-  const candidate =
-    value.type === "Polygon" && value.coordinates.length === 1
-      ? { type: "Polygon", coordinates: value.coordinates[0] }
-      : { type: value.type, coordinates: value.coordinates };
+  if (value.type !== "LineString" && value.type !== "Polygon") return null;
+  if (value.type === "Polygon" && value.coordinates.length !== 1) return null;
+  const positions = value.type === "Polygon" ? value.coordinates[0] : value.coordinates;
+  if (!Array.isArray(positions)) return null;
+  const coordinates: Point2D[] = [];
+  for (const position of positions) {
+    const point = point2DFromPosition(position);
+    if (!point) return null;
+    coordinates.push(point);
+  }
+  const candidate = { type: value.type, coordinates } as FeatureGeometry;
   if (!isFeatureGeometry(candidate)) return null;
   if (candidate.type === "LineString") return candidate;
 
-  const coordinates = candidate.coordinates.map(copyPoint);
-  const first = coordinates[0];
-  const last = coordinates.at(-1);
-  if (last && first[0] === last[0] && first[1] === last[1]) coordinates.pop();
-  const normalized = { type: "Polygon", coordinates };
+  const polygonCoordinates = candidate.coordinates.map(copyPoint);
+  const first = polygonCoordinates[0];
+  const last = polygonCoordinates.at(-1);
+  if (last && first[0] === last[0] && first[1] === last[1]) polygonCoordinates.pop();
+  const normalized = { type: "Polygon", coordinates: polygonCoordinates };
   return isFeatureGeometry(normalized) ? normalized : null;
 };
 
