@@ -10,7 +10,7 @@ import {
   type Point2D,
 } from "../domain/geometryFeature";
 import { simplifyFeatureGeometry, toRenderableStroke } from "../domain/renderableStroke";
-import { exportFeatureCollection } from "../lib/geojson";
+import { loadExportFeatureCollection } from "../lib/exportGeometryFeatures";
 import { importGeometryFeaturesWithContext } from "../lib/importGeometryFeatures";
 import { createPromiseQueue } from "../lib/promiseQueue";
 
@@ -208,7 +208,17 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     let anchor: HTMLAnchorElement | undefined;
     setOperationNotice(undefined);
     try {
-      const blob = new Blob([JSON.stringify(exportFeatureCollection(features, layers), null, 2)], {
+      const collection = await queueRef.current(async () => {
+        const repository = repositoryRef.current;
+        const generation = generationRef.current;
+        if (!repository) throw new Error("GeoJSON export is unavailable until storage has loaded.");
+        const exported = await loadExportFeatureCollection(repository);
+        if (repositoryRef.current !== repository || generationRef.current !== generation) {
+          throw new Error("GeoJSON export was cancelled because storage changed.");
+        }
+        return exported;
+      });
+      const blob = new Blob([JSON.stringify(collection, null, 2)], {
         type: "application/geo+json",
       });
       url = URL.createObjectURL(blob);
@@ -225,7 +235,7 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       anchor?.remove();
       if (url) URL.revokeObjectURL(url);
     }
-  }, [features, layers, loading]);
+  }, [loading]);
 
   const strokes = useMemo(() => features.map(toRenderableStroke), [features]);
   const canExport = !loading && repositoryRef.current !== null;
