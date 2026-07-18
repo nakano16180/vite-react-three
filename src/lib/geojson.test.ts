@@ -102,8 +102,20 @@ describe("GeoJSON codec", () => {
 
   it.each([
     ["2要素未満", [[0], [1, 1]]],
-    ["非数値", [[0, 0], ["x", 1]]],
-    ["非有限値", [[0, 0], [Number.POSITIVE_INFINITY, 1]]],
+    [
+      "非数値",
+      [
+        [0, 0],
+        ["x", 1],
+      ],
+    ],
+    [
+      "非有限値",
+      [
+        [0, 0],
+        [Number.POSITIVE_INFINITY, 1],
+      ],
+    ],
   ])("%sのpositionを含むgeometryをwarning付きでskipする", (_label, coordinates) => {
     const imported = importFeatureCollection({
       type: "Feature",

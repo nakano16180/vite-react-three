@@ -65,12 +65,7 @@ const copyPoint = ([x, y]: Point2D): Point2D => [x, y];
 const point2DFromPosition = (value: unknown): Point2D | null => {
   if (!Array.isArray(value) || value.length < 2) return null;
   const [x, y] = value;
-  return typeof x === "number" &&
-    Number.isFinite(x) &&
-    typeof y === "number" &&
-    Number.isFinite(y)
-    ? [x, y]
-    : null;
+  return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y) ? [x, y] : null;
 };
 
 export const exportFeatureCollection = (features: GeometryFeature[], layers: Layer[]): GeoJSONFeatureCollection => {
