@@ -2,21 +2,11 @@ import { useMemo } from "react";
 import { useThree } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
+import type { RenderableStroke } from "../domain/renderableStroke";
 import { getCentroid } from "../lib/geometry";
 
-interface Stroke {
-  id: string;
-  color: string;
-  width: number;
-  ptsPx: [number, number][];
-  geomType: "line" | "polygon";
-  length?: number;
-  area?: number;
-  perimeter?: number;
-}
-
 interface SceneProps {
-  strokes: Stroke[];
+  strokes: RenderableStroke[];
   hideStrokes?: boolean;
   showMeasurements?: boolean;
 }

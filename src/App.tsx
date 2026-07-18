@@ -5,26 +5,27 @@ import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
 import { StrokeEditor } from "./components/StrokeEditor";
-import { useDuckDBStrokes, type Stroke } from "./hooks/useDuckDBStrokes";
-import type { Point2D } from "./lib/geometry";
+import type { RenderableStroke } from "./domain/renderableStroke";
+import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
+import type { Point2D } from "./domain/geometryFeature";
 
 type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
 interface WorkspaceProps {
   interactionMode: InteractionMode;
   loading: boolean;
-  spatialLoaded: boolean;
+  storageStatus: StorageStatus;
   strokeColor: string;
   strokeWidth: number;
-  strokes: Stroke[];
-  onFinishStroke: ReturnType<typeof useDuckDBStrokes>["persistStroke"];
+  strokes: RenderableStroke[];
+  onFinishStroke: ReturnType<typeof useGeometryFeatures>["persistStroke"];
   onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
 }
 
 function Workspace({
   interactionMode,
   loading,
-  spatialLoaded,
+  storageStatus,
   strokeColor,
   strokeWidth,
   strokes,
@@ -75,11 +76,14 @@ function Workspace({
             DuckDB を初期化中…
           </div>
         )}
-        {!loading && !spatialLoaded && (
-          <div className="workspace-warning-overlay" data-testid="workspace-warning">
-            spatial 拡張のロードに失敗しました。環境によっては利用できない場合があります。
-            <br />
-            その場合、保存・再描画が動作しません（コンソールのログをご確認ください）。
+        {storageStatus.migrationWarning && (
+          <div className="workspace-warning-overlay" data-testid="storage-migration-warning" role="status">
+            {storageStatus.migrationWarning}
+          </div>
+        )}
+        {storageStatus.error && (
+          <div className="workspace-warning-overlay" data-testid="storage-error" role="alert">
+            {storageStatus.error}
           </div>
         )}
 
@@ -98,14 +102,15 @@ function Workspace({
   );
 }
 
-function StatusFooter({ opfsLoaded }: { opfsLoaded: boolean }) {
+function StatusFooter({ storageStatus }: { storageStatus: StorageStatus }) {
+  const storageLabel = storageStatus.opfs ? "OPFS" : "メモリ";
+  const engineLabel = storageStatus.store === "spatial" ? "Spatial" : "JSON fallback";
+  const persistenceLabel = storageStatus.opfs ? "永続ストレージ" : "一時ストレージ";
   return (
     <footer data-testid="status-footer" style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
-      {opfsLoaded ? (
-        <span style={{ color: "#16a34a", marginRight: 8 }}>💾 データ永続化中 (OPFS)</span>
-      ) : (
-        <span style={{ color: "#b45309", marginRight: 8 }}>⚠️ メモリのみ（リロードでリセット）</span>
-      )}
+      <span style={{ color: storageStatus.opfs ? "#16a34a" : "#b45309", marginRight: 8 }}>
+        {persistenceLabel}: {storageLabel} / {engineLabel}
+      </span>
       Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Measure モード: 長さ・面積・周長を表示 | Edit
       モード: 点をドラッグで移動 | Pan モード: ドラッグで移動・ホイールでズーム | Undo・Clear はヘッダーから
     </footer>
@@ -124,12 +129,11 @@ export default function App() {
     handleRefresh,
     handleUndo,
     loading,
-    opfsLoaded,
     persistStroke,
-    spatialLoaded,
+    storageStatus,
     strokes,
     updateStroke,
-  } = useDuckDBStrokes(strokeColor, strokeWidth, simplifyOn);
+  } = useGeometryFeatures(strokeColor, strokeWidth, simplifyOn);
 
   return (
     <div
@@ -161,7 +165,7 @@ export default function App() {
       <Workspace
         interactionMode={interactionMode}
         loading={loading}
-        spatialLoaded={spatialLoaded}
+        storageStatus={storageStatus}
         strokeColor={strokeColor}
         strokeWidth={strokeWidth}
         strokes={strokes}
@@ -169,7 +173,7 @@ export default function App() {
         onUpdateStroke={updateStroke}
       />
 
-      <StatusFooter opfsLoaded={opfsLoaded} />
+      <StatusFooter storageStatus={storageStatus} />
     </div>
   );
 }

@@ -1,18 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useThree } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
-
-interface Stroke {
-  id: string;
-  color: string;
-  width: number;
-  ptsPx: [number, number][];
-  geomType: "line" | "polygon";
-  area?: number;
-}
+import type { RenderableStroke } from "../domain/renderableStroke";
 
 interface StrokeEditorProps {
-  strokes: Stroke[];
+  strokes: RenderableStroke[];
   onUpdateStroke: (strokeId: string, newPtsPx: [number, number][]) => Promise<void>;
   enabled: boolean;
 }
