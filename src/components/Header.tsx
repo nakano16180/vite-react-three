@@ -16,11 +16,6 @@ interface HeaderProps {
   handleClear: () => void;
   handleExportGeoJSON: () => void;
   handleImportGeoJSON: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  handleFileLoad: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  handleClearPointClouds: () => void;
-  pcdFileContents: string[];
-  showMap: boolean;
-  setShowMap: (show: boolean) => void;
 }
 
 export function Header({
@@ -37,11 +32,6 @@ export function Header({
   handleClear,
   handleExportGeoJSON,
   handleImportGeoJSON,
-  handleFileLoad,
-  handleClearPointClouds,
-  pcdFileContents,
-  showMap,
-  setShowMap,
 }: HeaderProps) {
   return (
     <header
@@ -57,7 +47,7 @@ export function Header({
       }}
     >
       <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0, flex: "1 1 220px" }}>
-        DuckDB Spatial × R3F — Line Draw & PCD Viewer
+        DuckDB Spatial × R3F — Geometry Workbench
       </h1>
       <div
         style={{
@@ -147,34 +137,6 @@ export function Header({
           </button>
         </div>
 
-        {/* Map Toggle */}
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            alignItems: "center",
-            marginRight: 16,
-            borderRight: "1px solid #e5e5e5",
-            paddingRight: 16,
-          }}
-        >
-          <button
-            aria-pressed={showMap}
-            onClick={() => setShowMap(!showMap)}
-            style={{
-              padding: "4px 8px",
-              fontSize: 12,
-              backgroundColor: showMap ? "#28a745" : "#f8f9fa",
-              color: showMap ? "white" : "#212529",
-              border: "1px solid #dee2e6",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
-          >
-            {showMap ? "Hide Map" : "Show Map"}
-          </button>
-        </div>
-
         <label style={{ fontSize: 12 }}>色</label>
         <input
           type="color"
@@ -243,45 +205,6 @@ export function Header({
             onChange={handleImportGeoJSON}
             style={{ display: "none" }}
           />
-        </div>
-
-        {/* PCD File Loading */}
-        <div
-          style={{
-            marginLeft: 16,
-            borderLeft: "1px solid #e5e5e5",
-            paddingLeft: 16,
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <label
-            htmlFor="pcd-file-input"
-            style={{
-              cursor: "pointer",
-              padding: "4px 8px",
-              backgroundColor: "#007bff",
-              color: "white",
-              borderRadius: 4,
-              fontSize: 12,
-            }}
-          >
-            Load PCD File
-          </label>
-          <input id="pcd-file-input" type="file" accept=".pcd" onChange={handleFileLoad} style={{ display: "none" }} />
-          {pcdFileContents.length > 0 && (
-            <>
-              <span style={{ fontSize: 12, color: "#666" }}>
-                {pcdFileContents.length} cloud
-                {pcdFileContents.length > 1 ? "s" : ""} loaded
-              </span>
-              <button onClick={handleClearPointClouds} style={{ color: "#c00", fontSize: 12 }}>
-                Clear Clouds
-              </button>
-            </>
-          )}
         </div>
       </div>
     </header>

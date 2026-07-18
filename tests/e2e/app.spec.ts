@@ -28,6 +28,14 @@ test.describe("drawing workspace", () => {
     await expect(page.getByTestId("status-footer")).toContainText("Draw モード");
   });
 
+  test("focuses the workspace on DuckDB spatial drawing controls", async ({ page }) => {
+    await gotoApp(page);
+
+    await expect(page.getByRole("button", { name: "Show Map" })).toHaveCount(0);
+    await expect(page.getByText("Load PCD")).toHaveCount(0);
+    await expect(page.getByText("Clear PCD")).toHaveCount(0);
+  });
+
   test("draws a line and shows its measurement", async ({ page }) => {
     await gotoApp(page);
 

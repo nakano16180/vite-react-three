@@ -4,7 +4,6 @@ import { OrbitControls } from "@react-three/drei";
 import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
-import { MapView } from "./components/MapView";
 import { StrokeEditor } from "./components/StrokeEditor";
 import { useDuckDBStrokes, type Stroke } from "./hooks/useDuckDBStrokes";
 import type { Point2D } from "./lib/geometry";
@@ -14,8 +13,6 @@ type InteractionMode = "draw" | "pan" | "edit" | "measure";
 interface WorkspaceProps {
   interactionMode: InteractionMode;
   loading: boolean;
-  pcdFileContents: string[];
-  showMap: boolean;
   spatialLoaded: boolean;
   strokeColor: string;
   strokeWidth: number;
@@ -27,8 +24,6 @@ interface WorkspaceProps {
 function Workspace({
   interactionMode,
   loading,
-  pcdFileContents,
-  showMap,
   spatialLoaded,
   strokeColor,
   strokeWidth,
@@ -40,34 +35,29 @@ function Workspace({
     <main data-testid="workspace" style={{ flex: 1, padding: 12, minHeight: 0 }}>
       <div data-testid="canvas-workspace" style={{ position: "relative", width: "100%", height: "100%" }}>
         <div style={{ position: "absolute", inset: 0 }}>
-          {showMap ? (
-            <MapView visible={showMap} />
-          ) : (
-            <Canvas
-              data-testid="drawing-canvas"
-              orthographic
-              camera={{ position: [0, 0, 100], zoom: 1 }}
-              style={{ width: "100%", height: "100%" }}
-            >
-              <color attach="background" args={["#ffffff"]} />
-              <ambientLight intensity={0.5} />
-              <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
+          <Canvas
+            data-testid="drawing-canvas"
+            orthographic
+            camera={{ position: [0, 0, 100], zoom: 1 }}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <color attach="background" args={["#ffffff"]} />
+            <ambientLight intensity={0.5} />
+            <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
 
-              <Scene
-                pcdFileContents={pcdFileContents}
-                strokes={strokes}
-                hideStrokes={interactionMode === "edit"}
-                showMeasurements={interactionMode === "measure"}
-              />
-              <StrokeEditor strokes={strokes} onUpdateStroke={onUpdateStroke} enabled={interactionMode === "edit"} />
-              <DrawingSurface
-                onFinish={onFinishStroke}
-                color={strokeColor}
-                width={strokeWidth}
-                enabled={interactionMode === "draw"}
-              />
-            </Canvas>
-          )}
+            <Scene
+              strokes={strokes}
+              hideStrokes={interactionMode === "edit"}
+              showMeasurements={interactionMode === "measure"}
+            />
+            <StrokeEditor strokes={strokes} onUpdateStroke={onUpdateStroke} enabled={interactionMode === "edit"} />
+            <DrawingSurface
+              onFinish={onFinishStroke}
+              color={strokeColor}
+              width={strokeWidth}
+              enabled={interactionMode === "draw"}
+            />
+          </Canvas>
         </div>
 
         {loading && (
@@ -117,19 +107,16 @@ function StatusFooter({ opfsLoaded }: { opfsLoaded: boolean }) {
         <span style={{ color: "#b45309", marginRight: 8 }}>⚠️ メモリのみ（リロードでリセット）</span>
       )}
       Draw モード: クリックで点を追加・Escまたはダブルクリックで確定 | Measure モード: 長さ・面積・周長を表示 | Edit
-      モード: 点をドラッグで移動 | Pan モード: ドラッグで移動・ホイールでズーム | PCDファイル読み込み対応 | Undo・Clear
-      はヘッダーから
+      モード: 点をドラッグで移動 | Pan モード: ドラッグで移動・ホイールでズーム | Undo・Clear はヘッダーから
     </footer>
   );
 }
 
 export default function App() {
-  const [pcdFileContents, setPcdFileContents] = useState<string[]>([]);
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("draw");
   const [strokeColor, setStrokeColor] = useState("#222222");
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [simplifyOn, setSimplifyOn] = useState(true);
-  const [showMap, setShowMap] = useState(false);
   const {
     handleClear,
     handleExportGeoJSON,
@@ -143,30 +130,6 @@ export default function App() {
     strokes,
     updateStroke,
   } = useDuckDBStrokes(strokeColor, strokeWidth, simplifyOn);
-
-  const handleFileLoad = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (!file.name.toLowerCase().endsWith(".pcd")) {
-      alert("Please select a PCD file");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      if (content) {
-        setPcdFileContents((prev) => [...prev, content]);
-      }
-    };
-    reader.readAsText(file);
-    event.target.value = "";
-  };
-
-  const handleClearPointClouds = () => {
-    setPcdFileContents([]);
-  };
 
   return (
     <div
@@ -193,18 +156,11 @@ export default function App() {
         handleClear={handleClear}
         handleExportGeoJSON={handleExportGeoJSON}
         handleImportGeoJSON={handleImportGeoJSON}
-        handleFileLoad={handleFileLoad}
-        handleClearPointClouds={handleClearPointClouds}
-        pcdFileContents={pcdFileContents}
-        showMap={showMap}
-        setShowMap={setShowMap}
       />
 
       <Workspace
         interactionMode={interactionMode}
         loading={loading}
-        pcdFileContents={pcdFileContents}
-        showMap={showMap}
         spatialLoaded={spatialLoaded}
         strokeColor={strokeColor}
         strokeWidth={strokeWidth}
