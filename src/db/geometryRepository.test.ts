@@ -7,6 +7,7 @@ import {
   type FeatureGeometry,
 } from "../domain/geometryFeature";
 import {
+  CURRENT_SCHEMA_VERSION,
   GeometryRepository,
   PersistenceCheckpointError,
   mapSpatialFeatureRow,
@@ -14,6 +15,10 @@ import {
   mapJsonFeatureRow,
   mapLegacyJsonRow,
 } from "./geometryRepository";
+
+const result = (rows: Array<Record<string, unknown>> = []) => ({
+  toArray: () => rows.map((value) => ({ toJSON: () => value })),
+});
 
 describe("geometry repository row mapping", () => {
   it("JSON store rowをcanonical featureへ変換する", () => {
@@ -101,9 +106,12 @@ describe("geometry repository store parity", () => {
   };
 
   it.each(["spatial", "json"] as const)("%s updateはcanonical geometryをsimplifyせず保存する", async (store) => {
-    const query = vi.fn().mockResolvedValue({ toArray: () => [] });
+    const query = vi.fn().mockResolvedValue(result());
     const close = vi.fn().mockResolvedValue(undefined);
-    const prepare = vi.fn().mockResolvedValue({ query, close });
+    const prepare = vi.fn(async (sql: string) => ({
+      query: sql.startsWith("SELECT 1 AS present") ? vi.fn().mockResolvedValue(result([{ present: 1 }])) : query,
+      close,
+    }));
     const connection = { prepare } as unknown as AsyncDuckDBConnection;
     const repository = new GeometryRepository(connection, {
       opfs: false,
@@ -113,8 +121,8 @@ describe("geometry repository store parity", () => {
 
     await repository.updateGeometry("feature-1", geometry);
 
-    expect(prepare).toHaveBeenCalledOnce();
-    expect(prepare.mock.calls[0][0]).not.toContain("ST_Simplify");
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(prepare.mock.calls[1][0]).not.toContain("ST_Simplify");
     expect(query).toHaveBeenCalledOnce();
     if (store === "spatial") {
       expect(query).toHaveBeenCalledWith("LINESTRING(0 0, 1 0.25, 2 0)", "feature-1");
@@ -132,11 +140,11 @@ describe("geometry repository store parity", () => {
         [3, 2],
       ],
     };
-    const query = vi.fn().mockResolvedValue({ toArray: () => [] });
-    const prepare = vi.fn().mockResolvedValue({
-      query,
+    const query = vi.fn().mockResolvedValue(result());
+    const prepare = vi.fn(async (sql: string) => ({
+      query: sql.startsWith("SELECT 1 AS present") ? vi.fn().mockResolvedValue(result([{ present: 1 }])) : query,
       close: vi.fn().mockResolvedValue(undefined),
-    });
+    }));
     const repository = new GeometryRepository({ prepare } as unknown as AsyncDuckDBConnection, {
       opfs: false,
       spatial: store === "spatial",
@@ -154,8 +162,10 @@ describe("geometry repository store parity", () => {
 
   it("rollback失敗時も元のmigration errorをwarningで返す", async () => {
     const prepare = vi.fn(async (sql: string) => ({
-      query: vi.fn(async () => {
-        if (sql.startsWith("SELECT value")) throw new Error("legacy read failed");
+      query: vi.fn(async (...args: unknown[]) => {
+        if (sql.startsWith("SELECT value") && args[0] === "legacy_strokes_migrated") {
+          throw new Error("legacy read failed");
+        }
         return { toArray: () => [] };
       }),
       close: vi.fn().mockResolvedValue(undefined),
@@ -198,13 +208,15 @@ describe("legacy migration precedence", () => {
 
 describe("transactional GeoJSON import", () => {
   it("layers/featuresを単一transactionでcommitする", async () => {
-    const statementQuery = vi.fn().mockResolvedValue({ toArray: () => [] });
+    const statementQuery = vi.fn().mockResolvedValue(result());
     const connection = {
       query: vi.fn().mockResolvedValue({ toArray: () => [] }),
-      prepare: vi.fn().mockResolvedValue({
-        query: statementQuery,
+      prepare: vi.fn(async (sql: string) => ({
+        query: sql.startsWith("SELECT 1 AS present")
+          ? vi.fn().mockResolvedValue(result([{ present: 1 }]))
+          : statementQuery,
         close: vi.fn().mockResolvedValue(undefined),
-      }),
+      })),
     } as unknown as AsyncDuckDBConnection;
     const repository = new GeometryRepository(connection, {
       opfs: false,
@@ -229,19 +241,20 @@ describe("transactional GeoJSON import", () => {
   });
 
   it("途中failure時にrollbackし元errorを保持する", async () => {
-    const statementQuery = vi
-      .fn()
-      .mockResolvedValueOnce({ toArray: () => [] })
-      .mockRejectedValueOnce(new Error("feature insert failed"));
+    const statementQuery = vi.fn().mockRejectedValue(new Error("feature insert failed"));
     const connection = {
       query: vi.fn(async (sql: string) => {
         if (sql === "ROLLBACK;") throw new Error("rollback failed");
         return { toArray: () => [] };
       }),
-      prepare: vi.fn().mockResolvedValue({
-        query: statementQuery,
+      prepare: vi.fn(async (sql: string) => ({
+        query: sql.startsWith("SELECT 1 AS present")
+          ? vi.fn().mockResolvedValue(result([{ present: 1 }]))
+          : sql.startsWith("INSERT INTO features_json")
+            ? statementQuery
+            : vi.fn().mockResolvedValue(result()),
         close: vi.fn().mockResolvedValue(undefined),
-      }),
+      })),
     } as unknown as AsyncDuckDBConnection;
     const repository = new GeometryRepository(connection, {
       opfs: false,
@@ -281,10 +294,10 @@ describe("OPFS durability", () => {
     const checkpoint = vi.fn().mockResolvedValue({ toArray: () => [] });
     const connection = {
       query: checkpoint,
-      prepare: vi.fn().mockResolvedValue({
-        query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn().mockResolvedValue(sql.startsWith("SELECT 1 AS present") ? result([{ present: 1 }]) : result()),
         close: vi.fn().mockResolvedValue(undefined),
-      }),
+      })),
     } as unknown as AsyncDuckDBConnection;
     const repository = new GeometryRepository(connection, {
       opfs: true,
@@ -302,10 +315,10 @@ describe("OPFS durability", () => {
     const query = vi.fn().mockResolvedValue({ toArray: () => [] });
     const connection = {
       query,
-      prepare: vi.fn().mockResolvedValue({
-        query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn().mockResolvedValue(sql.startsWith("SELECT 1 AS present") ? result([{ present: 1 }]) : result()),
         close: vi.fn().mockResolvedValue(undefined),
-      }),
+      })),
     } as unknown as AsyncDuckDBConnection;
     const repository = new GeometryRepository(connection, {
       opfs: true,
@@ -321,10 +334,10 @@ describe("OPFS durability", () => {
   it("CHECKPOINT失敗は書込み成功を明示するdiagnostic errorにする", async () => {
     const connection = {
       query: vi.fn().mockRejectedValue(new Error("disk full")),
-      prepare: vi.fn().mockResolvedValue({
-        query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn().mockResolvedValue(sql.startsWith("SELECT 1 AS present") ? result([{ present: 1 }]) : result()),
         close: vi.fn().mockResolvedValue(undefined),
-      }),
+      })),
     } as unknown as AsyncDuckDBConnection;
     const repository = new GeometryRepository(connection, {
       opfs: true,
@@ -362,5 +375,210 @@ describe("OPFS durability", () => {
       migrationWarning: expect.stringContaining("write succeeded"),
     });
     expect(query).not.toHaveBeenCalledWith("ROLLBACK;");
+  });
+});
+
+describe("schema metadata", () => {
+  it("未設定schema versionを現versionへ初期化する", async () => {
+    const metadata = new Map<string, string>();
+    const connection = {
+      query: vi.fn().mockResolvedValue(result()),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.startsWith("INSERT INTO app_metadata")) {
+            metadata.set(String(args[0]), String(args[1]));
+          }
+          if (sql.includes("information_schema.tables")) return result();
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize();
+
+    expect(metadata.get("schema_version")).toBe(String(CURRENT_SCHEMA_VERSION));
+  });
+
+  it("未知の未来schema versionはfail closedする", async () => {
+    const connection = {
+      query: vi.fn().mockResolvedValue(result()),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) =>
+          sql.startsWith("SELECT value") && args[0] === "schema_version"
+            ? result([{ value: String(CURRENT_SCHEMA_VERSION + 1) }])
+            : result()
+        ),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await expect(
+      new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
+    ).rejects.toThrow("Unsupported future schema version");
+  });
+});
+
+describe("legacy migration row isolation", () => {
+  it("valid/invalid JSON・Spatial rows混在でもvalid rowsをcommitしmarkerとskip warningを返す", async () => {
+    const metadata = new Map<string, string>([["schema_version", String(CURRENT_SCHEMA_VERSION)]]);
+    const insertedIds: string[] = [];
+    const connection = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes("FROM strokes_json")) {
+          return result([
+            {
+              id: "valid",
+              coords: "[[0,0],[2,2]]",
+              color: "#111111",
+              width: 2,
+              geom_type: "line",
+              created_at: "2026-07-18T00:00:00.000Z",
+            },
+            {
+              id: "invalid",
+              coords: "not-json",
+              color: "#111111",
+              width: 2,
+              geom_type: "line",
+              created_at: "2026-07-18T00:00:00.000Z",
+            },
+          ]);
+        }
+        if (sql.includes("FROM strokes ORDER BY")) {
+          return result([
+            {
+              id: "valid-spatial",
+              geometry: '{"type":"LineString","coordinates":[[3,3],[4,4]]}',
+              color: "#222222",
+              width: 3,
+              geom_type: "line",
+              created_at: "2026-07-18T00:00:00.000Z",
+            },
+            {
+              id: "invalid-spatial",
+              geometry: "not-json",
+              color: "#222222",
+              width: 3,
+              geom_type: "line",
+              created_at: "2026-07-18T00:00:00.000Z",
+            },
+          ]);
+        }
+        return result();
+      }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.includes("information_schema.tables")) {
+            return result([{ table_name: "strokes_json" }, { table_name: "strokes" }]);
+          }
+          if (sql.startsWith("INSERT INTO app_metadata")) metadata.set(String(args[0]), String(args[1]));
+          if (sql.startsWith("SELECT 1 AS present")) return result([{ present: 1 }]);
+          if (sql.startsWith("INSERT INTO features_json")) insertedIds.push(String(args[0]));
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await expect(
+      new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
+    ).resolves.toEqual({ migrationWarning: "Legacy stroke migration skipped 2 invalid rows." });
+    expect(insertedIds).toEqual(["valid", "valid-spatial"]);
+    expect(metadata.get("legacy_strokes_migrated")).toBe("true");
+    expect(connection.query).toHaveBeenCalledWith("COMMIT;");
+  });
+});
+
+describe("layer invariant", () => {
+  it.each(["spatial", "json"] as const)("%s insertは存在しないlayerをrejectする", async (store) => {
+    const connection = {
+      prepare: vi.fn(async () => ({
+        query: vi.fn().mockResolvedValue(result()),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: false,
+      spatial: store === "spatial",
+      store,
+    });
+    const feature = createGeometryFeature({
+      layerId: "missing",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      },
+    });
+
+    await expect(repository.insertFeature(feature)).rejects.toThrow('Layer "missing" does not exist');
+  });
+
+  it("importはlayer insert後の同transaction内でfeature layerを検証する", async () => {
+    let layerInserted = false;
+    const connection = {
+      query: vi.fn().mockResolvedValue(result()),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async () => {
+          if (sql.startsWith("INSERT INTO layers")) layerInserted = true;
+          if (sql.startsWith("SELECT 1 AS present")) return result(layerInserted ? [{ present: 1 }] : []);
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const feature = createGeometryFeature({
+      layerId: "imported-layer",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      },
+    });
+
+    await new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).importGeoJSON(
+      [{ ...DEFAULT_LAYER, id: "imported-layer" }],
+      [feature]
+    );
+
+    expect(layerInserted).toBe(true);
+    expect(connection.query).toHaveBeenCalledWith("COMMIT;");
+  });
+
+  it.each(["spatial", "json"] as const)("%s updateはorphan featureをrejectする", async (store) => {
+    const connection = {
+      prepare: vi.fn().mockResolvedValue({
+        query: vi.fn().mockResolvedValue(result()),
+        close: vi.fn(),
+      }),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: false,
+      spatial: store === "spatial",
+      store,
+    });
+
+    await expect(
+      repository.updateGeometry("orphan", {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      })
+    ).rejects.toThrow('Feature "orphan" does not reference an existing layer');
   });
 });

@@ -21,6 +21,7 @@ const getCanvasBox = async (page: Page) => {
 test.describe("drawing workspace", () => {
   test("renders the app shell and drawing canvas", async ({ page }) => {
     await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
 
     await expect(page.getByTestId("app-header")).toContainText("DuckDB Spatial");
     await expect(page.getByRole("button", { name: "Draw" })).toHaveAttribute("aria-pressed", "true");
@@ -32,6 +33,7 @@ test.describe("drawing workspace", () => {
 
   test("focuses the workspace on DuckDB spatial drawing controls", async ({ page }) => {
     await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
 
     await expect(page.getByRole("button", { name: "Show Map" })).toHaveCount(0);
     await expect(page.getByText("Load PCD")).toHaveCount(0);
@@ -64,16 +66,16 @@ test.describe("drawing workspace", () => {
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Measure" }).click();
-    await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
+    await expect(page.getByText("Length: 161.2 px")).toBeVisible();
     await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
+    await expect(page.getByText("Length: 161.2 px")).toBeVisible();
 
     const status = page.getByTestId("storage-status");
     await expect(status).toContainText("OPFS");
     await page.reload();
     await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
     await page.getByRole("button", { name: "Measure" }).click();
-    await expect(page.getByText(/Length: \d+\.\d px/)).toBeVisible();
+    await expect(page.getByText("Length: 161.2 px")).toBeVisible();
 
     await page.getByRole("button", { name: "Undo" }).click();
     await expect(page.getByText(/Length: \d+\.\d px/)).toHaveCount(0);

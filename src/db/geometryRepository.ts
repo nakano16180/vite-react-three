@@ -15,6 +15,8 @@ import type { DuckDBCapabilities } from "./createDuckDB";
 
 type Row = Record<string, unknown>;
 
+export const CURRENT_SCHEMA_VERSION = 1;
+
 export class PersistenceCheckpointError extends Error {
   constructor(cause: unknown) {
     super(`OPFS write succeeded, but CHECKPOINT failed: ${cause instanceof Error ? cause.message : String(cause)}`, {
@@ -176,10 +178,12 @@ export class GeometryRepository {
       `);
     }
     await this.insertMetadataIfAbsent("active_feature_store", this.capabilities.store);
+    await this.initializeSchemaVersion();
     await this.insertLayers([DEFAULT_LAYER], true);
 
     await this.connection.query("BEGIN TRANSACTION;");
     let committed = false;
+    let skippedRows = 0;
     try {
       const migrated = await this.metadataValue("legacy_strokes_migrated");
       if (migrated !== "true") {
@@ -191,7 +195,11 @@ export class GeometryRepository {
             "SELECT id, coords, color, width, geom_type, created_at FROM strokes_json ORDER BY created_at ASC;"
           );
           for (const row of rows.toArray()) {
-            jsonFeatures.push(mapLegacyJsonRow(row.toJSON() as LegacyJsonRow));
+            try {
+              jsonFeatures.push(mapLegacyJsonRow(row.toJSON() as LegacyJsonRow));
+            } catch {
+              skippedRows += 1;
+            }
           }
         }
         if (tables.has("strokes")) {
@@ -199,15 +207,19 @@ export class GeometryRepository {
             "SELECT id, ST_AsGeoJSON(geom) AS geometry, color, width, geom_type, created_at FROM strokes ORDER BY created_at ASC;"
           );
           for (const row of rows.toArray()) {
-            const value = row.toJSON() as Row;
-            spatialFeatures.push({
-              id: stringValue(value.id),
-              geometry: geometryFromGeoJson(value.geometry),
-              properties: {},
-              style: createDefaultStyle(stringValue(value.color) || "#222222", Number(value.width) || 4),
-              layerId: DEFAULT_LAYER_ID,
-              createdAt: isoTimestamp(value.created_at),
-            });
+            try {
+              const value = row.toJSON() as Row;
+              spatialFeatures.push({
+                id: stringValue(value.id),
+                geometry: geometryFromGeoJson(value.geometry),
+                properties: {},
+                style: createDefaultStyle(stringValue(value.color) || "#222222", Number(value.width) || 4),
+                layerId: DEFAULT_LAYER_ID,
+                createdAt: isoTimestamp(value.created_at),
+              });
+            } catch {
+              skippedRows += 1;
+            }
           }
         }
         for (const feature of mergeLegacyFeatures(jsonFeatures, spatialFeatures)) {
@@ -218,7 +230,13 @@ export class GeometryRepository {
       await this.connection.query("COMMIT;");
       committed = true;
       await this.checkpoint();
-      return {};
+      return skippedRows
+        ? {
+            migrationWarning: `Legacy stroke migration skipped ${skippedRows} invalid ${
+              skippedRows === 1 ? "row" : "rows"
+            }.`,
+          }
+        : {};
     } catch (error) {
       if (committed) {
         return {
@@ -250,6 +268,7 @@ export class GeometryRepository {
   }
 
   async insertFeature(feature: GeometryFeature, ignoreConflict = false, deferCheckpoint = false): Promise<void> {
+    await this.assertLayerExists(feature.layerId);
     const conflict = ignoreConflict ? " ON CONFLICT DO NOTHING" : "";
     const sql =
       this.capabilities.store === "spatial"
@@ -286,6 +305,7 @@ export class GeometryRepository {
   }
 
   async updateGeometry(id: string, geometry: FeatureGeometry): Promise<void> {
+    await this.assertFeatureLayerExists(id);
     if (this.capabilities.store === "spatial") {
       const statement = await this.connection.prepare(
         "UPDATE features SET geom = ST_GeomFromText(CAST(? AS VARCHAR)) WHERE id = ?;"
@@ -375,6 +395,55 @@ export class GeometryRepository {
       await this.connection.query("CHECKPOINT;");
     } catch (error) {
       throw new PersistenceCheckpointError(error);
+    }
+  }
+
+  private async initializeSchemaVersion(): Promise<void> {
+    const stored = await this.metadataValue("schema_version");
+    if (stored === undefined) {
+      await this.setMetadata("schema_version", String(CURRENT_SCHEMA_VERSION));
+      return;
+    }
+    const version = Number(stored);
+    if (!Number.isInteger(version) || version < 0) {
+      throw new Error(`Unsupported schema version: ${stored}`);
+    }
+    if (version > CURRENT_SCHEMA_VERSION) {
+      throw new Error(
+        `Unsupported future schema version ${version}; this app supports up to ${CURRENT_SCHEMA_VERSION}.`
+      );
+    }
+    if (version === 0) {
+      await this.setMetadata("schema_version", String(CURRENT_SCHEMA_VERSION));
+      return;
+    }
+    if (version !== CURRENT_SCHEMA_VERSION) throw new Error(`Unsupported schema version: ${version}`);
+  }
+
+  private async assertLayerExists(layerId: string): Promise<void> {
+    const statement = await this.connection.prepare("SELECT 1 AS present FROM layers WHERE id = ? LIMIT 1;");
+    try {
+      if ((await statement.query(layerId)).toArray().length === 0) {
+        throw new Error(`Layer "${layerId}" does not exist`);
+      }
+    } finally {
+      await statement.close();
+    }
+  }
+
+  private async assertFeatureLayerExists(id: string): Promise<void> {
+    const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+    const statement = await this.connection.prepare(
+      `SELECT 1 AS present FROM ${table} AS feature
+       INNER JOIN layers AS layer ON layer.id = feature.layer_id
+       WHERE feature.id = ? LIMIT 1;`
+    );
+    try {
+      if ((await statement.query(id)).toArray().length === 0) {
+        throw new Error(`Feature "${id}" does not reference an existing layer`);
+      }
+    } finally {
+      await statement.close();
     }
   }
 

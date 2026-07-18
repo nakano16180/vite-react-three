@@ -48,6 +48,9 @@ const isLayer = (value: unknown): value is Layer =>
   Number.isFinite(value.order) &&
   typeof value.createdAt === "string";
 
+const isFiniteDate = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0 && Number.isFinite(Date.parse(value));
+
 const isStyle = (value: unknown): value is FeatureStyle =>
   isRecord(value) &&
   typeof value.strokeColor === "string" &&
@@ -153,7 +156,11 @@ export const importFeatureCollection = (
   const rawLayers = isRecord(input.workbench) ? input.workbench.layers : undefined;
   const layers: Layer[] =
     Array.isArray(rawLayers) && rawLayers.length > 0 && rawLayers.every(isLayer)
-      ? rawLayers.map((layer) => ({ ...layer }))
+      ? rawLayers.map((layer, index) => {
+          if (isFiniteDate(layer.createdAt)) return { ...layer, createdAt: new Date(layer.createdAt).toISOString() };
+          warnings.push(`Layer ${index} has invalid createdAt; using the default timestamp`);
+          return { ...layer, createdAt: DEFAULT_LAYER.createdAt };
+        })
       : [DEFAULT_LAYER];
   const layerIds = new Set(layers.map((layer) => layer.id));
   const usedIds = new Set(existingIds);
@@ -185,6 +192,10 @@ export const importFeatureCollection = (
       layerIds.add(DEFAULT_LAYER_ID);
     }
 
+    const createdAt = isFiniteDate(metadata.createdAt) ? new Date(metadata.createdAt).toISOString() : undefined;
+    if (metadata.createdAt !== undefined && createdAt === undefined) {
+      warnings.push(`Feature ${index} has invalid createdAt; using the default timestamp`);
+    }
     features.push(
       createGeometryFeature({
         id: uniqueId(rawFeature.id ?? legacy.id, usedIds),
@@ -192,7 +203,7 @@ export const importFeatureCollection = (
         properties: readProperties(rawFeature.properties),
         style,
         layerId: requestedLayerId,
-        createdAt: typeof metadata.createdAt === "string" ? metadata.createdAt : undefined,
+        createdAt,
       })
     );
   });

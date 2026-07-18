@@ -247,4 +247,32 @@ describe("GeoJSON codec", () => {
     const unusedLayer = { ...DEFAULT_LAYER, id: "unused", name: "Unused" };
     expect(exportFeatureCollection([feature], [DEFAULT_LAYER, unusedLayer]).workbench.layers).toEqual([DEFAULT_LAYER]);
   });
+
+  it("不正なfeature/layer createdAtをdefault timestampへfallbackしてwarningを返す", () => {
+    const imported = importFeatureCollection({
+      type: "FeatureCollection",
+      workbench: {
+        layers: [{ ...DEFAULT_LAYER, id: "dated", createdAt: "not-a-date" }],
+      },
+      features: [
+        {
+          type: "Feature",
+          id: "dated-feature",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [0, 0],
+              [1, 1],
+            ],
+          },
+          properties: {},
+          workbench: { layerId: "dated", createdAt: "Infinity" },
+        },
+      ],
+    });
+
+    expect(Number.isFinite(Date.parse(imported.layers[0].createdAt))).toBe(true);
+    expect(Number.isFinite(Date.parse(imported.features[0].createdAt))).toBe(true);
+    expect(imported.warnings).toHaveLength(2);
+  });
 });
