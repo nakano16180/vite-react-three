@@ -14,6 +14,7 @@ import {
 import type { DuckDBCapabilities } from "./createDuckDB";
 
 type Row = Record<string, unknown>;
+type InsertConflictPolicy = "error" | "ignore" | "replace";
 
 export const CURRENT_SCHEMA_VERSION = 3;
 
@@ -216,12 +217,12 @@ export class GeometryRepository {
     let replacedCreatedAtValues = 0;
     const diagnostics: string[] = [];
     try {
-      const migrated = await this.metadataValue("legacy_strokes_migrated");
-      if (migrated !== "true") {
+      const migrated = (await this.metadataValue("legacy_strokes_migrated")) === "true";
+      if (!migrated) {
         const tables = await this.legacyTables();
-        const jsonFeatures: GeometryFeature[] = [];
-        const spatialFeatures: GeometryFeature[] = [];
-        if (tables.has("strokes_json")) {
+        let jsonMigrated = (await this.metadataValue("legacy_strokes_json_migrated")) === "true";
+        let spatialMigrated = (await this.metadataValue("legacy_strokes_spatial_migrated")) === "true";
+        if (!jsonMigrated && tables.has("strokes_json")) {
           const rows = await this.connection.query(
             "SELECT id, coords, color, width, geom_type, created_at FROM strokes_json ORDER BY created_at ASC;"
           );
@@ -230,14 +231,18 @@ export class GeometryRepository {
               const value = row.toJSON() as LegacyJsonRow;
               const feature = mapLegacyJsonRow(value);
               if (!isValidTimestamp(value.created_at)) replacedCreatedAtValues += 1;
-              jsonFeatures.push(feature);
+              await this.insertFeature(feature, "ignore", true);
             } catch {
               skippedRows += 1;
             }
           }
         }
-        const spatialMigrationPending = tables.has("strokes") && !this.capabilities.spatial;
-        if (tables.has("strokes") && this.capabilities.spatial) {
+        if (!jsonMigrated) {
+          await this.setMetadata("legacy_strokes_json_migrated", "true");
+          jsonMigrated = true;
+        }
+        const spatialMigrationPending = !spatialMigrated && tables.has("strokes") && !this.capabilities.spatial;
+        if (!spatialMigrated && tables.has("strokes") && this.capabilities.spatial) {
           const rows = await this.connection.query(
             "SELECT id, ST_AsGeoJSON(geom) AS geometry, color, width, geom_type, created_at FROM strokes ORDER BY created_at ASC;"
           );
@@ -253,16 +258,17 @@ export class GeometryRepository {
                 createdAt: isoTimestamp(value.created_at),
               };
               if (!isValidTimestamp(value.created_at)) replacedCreatedAtValues += 1;
-              spatialFeatures.push(feature);
+              await this.insertFeature(feature, "replace", true);
             } catch {
               skippedRows += 1;
             }
           }
         }
-        for (const feature of mergeLegacyFeatures(jsonFeatures, spatialFeatures)) {
-          await this.insertFeature(feature, true, true);
+        if (!spatialMigrated && !spatialMigrationPending) {
+          await this.setMetadata("legacy_strokes_spatial_migrated", "true");
+          spatialMigrated = true;
         }
-        if (!spatialMigrationPending) {
+        if (jsonMigrated && spatialMigrated) {
           await this.setMetadata("legacy_strokes_migrated", "true");
         }
         if (spatialMigrationPending) {
@@ -315,10 +321,32 @@ export class GeometryRepository {
     return rows.toArray().map((row) => mapJsonFeatureRow(row.toJSON() as JsonFeatureRow));
   }
 
-  async insertFeature(feature: GeometryFeature, ignoreConflict = false, deferCheckpoint = false): Promise<void> {
+  async insertFeature(
+    feature: GeometryFeature,
+    conflictPolicy: InsertConflictPolicy = "error",
+    deferCheckpoint = false
+  ): Promise<void> {
     await this.assertLayerExists(feature.layerId);
     const insertionOrder = await this.nextInsertionOrder();
-    const conflict = ignoreConflict ? " ON CONFLICT DO NOTHING" : "";
+    const conflict =
+      conflictPolicy === "ignore"
+        ? " ON CONFLICT DO NOTHING"
+        : conflictPolicy === "replace"
+          ? this.capabilities.store === "spatial"
+            ? ` ON CONFLICT (id) DO UPDATE SET
+                 geom = EXCLUDED.geom,
+                 properties = EXCLUDED.properties,
+                 style = EXCLUDED.style,
+                 layer_id = EXCLUDED.layer_id,
+                 created_at = EXCLUDED.created_at`
+            : ` ON CONFLICT (id) DO UPDATE SET
+                 geom_type = EXCLUDED.geom_type,
+                 coordinates = EXCLUDED.coordinates,
+                 properties = EXCLUDED.properties,
+                 style = EXCLUDED.style,
+                 layer_id = EXCLUDED.layer_id,
+                 created_at = EXCLUDED.created_at`
+          : "";
     const sql =
       this.capabilities.store === "spatial"
         ? `INSERT INTO features(id, geom, properties, style, layer_id, created_at, insertion_order)
@@ -427,7 +455,7 @@ export class GeometryRepository {
     await this.connection.query("BEGIN TRANSACTION;");
     try {
       await this.insertLayers(layers, true);
-      for (const feature of features) await this.insertFeature(feature, false, true);
+      for (const feature of features) await this.insertFeature(feature, "error", true);
       await this.connection.query("COMMIT;");
     } catch (error) {
       try {

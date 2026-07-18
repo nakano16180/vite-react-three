@@ -732,6 +732,88 @@ describe("legacy migration row isolation", () => {
     expect(metadata.get("legacy_strokes_migrated")).toBeUndefined();
     expect(query).toHaveBeenCalledWith("COMMIT;");
   });
+
+  it("Spatial migration pending中も完了済みstrokes_jsonを再実行しない", async () => {
+    const metadata = new Map<string, string>([
+      ["schema_version", String(CURRENT_SCHEMA_VERSION)],
+      ["legacy_strokes_json_migrated", "true"],
+    ]);
+    const query = vi.fn().mockResolvedValue(result());
+    const connection = {
+      query,
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.includes("information_schema.tables")) {
+            return result([{ table_name: "strokes_json" }, { table_name: "strokes" }]);
+          }
+          if (sql.startsWith("INSERT INTO app_metadata")) metadata.set(String(args[0]), String(args[1]));
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await expect(
+      new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
+    ).resolves.toEqual({
+      migrationWarning: "Legacy Spatial stroke migration is pending until the Spatial extension is available.",
+    });
+
+    expect(query.mock.calls.some(([sql]) => String(sql).includes("FROM strokes_json"))).toBe(false);
+    expect(metadata.get("legacy_strokes_json_migrated")).toBe("true");
+    expect(metadata.get("legacy_strokes_spatial_migrated")).toBeUndefined();
+  });
+
+  it("後発Spatial migrationは同一IDのJSON由来featureを置換する", async () => {
+    const metadata = new Map<string, string>([
+      ["schema_version", String(CURRENT_SCHEMA_VERSION)],
+      ["legacy_strokes_json_migrated", "true"],
+    ]);
+    const insertSql: string[] = [];
+    const connection = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes("FROM strokes ORDER BY")) {
+          return result([
+            {
+              id: "shared",
+              geometry: '{"type":"LineString","coordinates":[[3,3],[4,4]]}',
+              color: "#222222",
+              width: 3,
+              geom_type: "line",
+              created_at: "2026-07-18T00:00:00.000Z",
+            },
+          ]);
+        }
+        if (sql.includes("MAX(insertion_order)")) return result([{ next_order: 2 }]);
+        return result();
+      }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.includes("information_schema.tables")) return result([{ table_name: "strokes" }]);
+          if (sql.startsWith("INSERT INTO app_metadata")) metadata.set(String(args[0]), String(args[1]));
+          if (sql.startsWith("SELECT 1 AS present")) return result([{ present: 1 }]);
+          if (sql.startsWith("INSERT INTO features_json")) insertSql.push(sql);
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await new GeometryRepository(connection, { opfs: false, spatial: true, store: "json" }).initialize();
+
+    expect(insertSql).toHaveLength(1);
+    expect(insertSql[0]).toContain("ON CONFLICT (id) DO UPDATE");
+    expect(metadata.get("legacy_strokes_spatial_migrated")).toBe("true");
+    expect(metadata.get("legacy_strokes_migrated")).toBe("true");
+  });
 });
 
 describe("undo insertion order", () => {
