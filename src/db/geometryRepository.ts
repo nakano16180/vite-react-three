@@ -15,7 +15,7 @@ import type { DuckDBCapabilities } from "./createDuckDB";
 
 type Row = Record<string, unknown>;
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export class PersistenceCheckpointError extends Error {
   constructor(cause: unknown) {
@@ -169,7 +169,8 @@ export class GeometryRepository {
           style JSON NOT NULL,
           layer_id TEXT NOT NULL,
           created_at TIMESTAMP NOT NULL,
-          inserted_at TIMESTAMP NOT NULL DEFAULT now()
+          inserted_at TIMESTAMP NOT NULL DEFAULT now(),
+          insertion_order BIGINT NOT NULL
         );
       `);
     } else {
@@ -182,13 +183,28 @@ export class GeometryRepository {
           style JSON NOT NULL,
           layer_id TEXT NOT NULL,
           created_at TIMESTAMP NOT NULL,
-          inserted_at TIMESTAMP NOT NULL DEFAULT now()
+          inserted_at TIMESTAMP NOT NULL DEFAULT now(),
+          insertion_order BIGINT NOT NULL
         );
       `);
     }
     if (previousSchemaVersion === 1) {
       const table = this.capabilities.store === "spatial" ? "features" : "features_json";
       await this.connection.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT now();`);
+    }
+    if (previousSchemaVersion === 1 || previousSchemaVersion === 2) {
+      const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+      await this.connection.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS insertion_order BIGINT;`);
+      await this.connection.query(`
+        UPDATE ${table}
+        SET insertion_order = ordered.row_number
+        FROM (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY inserted_at ASC, id ASC) AS row_number
+          FROM ${table}
+        ) AS ordered
+        WHERE ${table}.id = ordered.id AND ${table}.insertion_order IS NULL;
+      `);
+      await this.connection.query(`ALTER TABLE ${table} ALTER COLUMN insertion_order SET NOT NULL;`);
       await this.setMetadata("schema_version", String(CURRENT_SCHEMA_VERSION));
     }
     await this.initializeActiveStore();
@@ -301,13 +317,14 @@ export class GeometryRepository {
 
   async insertFeature(feature: GeometryFeature, ignoreConflict = false, deferCheckpoint = false): Promise<void> {
     await this.assertLayerExists(feature.layerId);
+    const insertionOrder = await this.nextInsertionOrder();
     const conflict = ignoreConflict ? " ON CONFLICT DO NOTHING" : "";
     const sql =
       this.capabilities.store === "spatial"
-        ? `INSERT INTO features(id, geom, properties, style, layer_id, created_at)
-           VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), CAST(? AS JSON), CAST(? AS JSON), ?, CAST(? AS TIMESTAMP))${conflict};`
-        : `INSERT INTO features_json(id, geom_type, coordinates, properties, style, layer_id, created_at)
-           VALUES (?, ?, CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), ?, CAST(? AS TIMESTAMP))${conflict};`;
+        ? `INSERT INTO features(id, geom, properties, style, layer_id, created_at, insertion_order)
+           VALUES (?, ST_GeomFromText(CAST(? AS VARCHAR)), CAST(? AS JSON), CAST(? AS JSON), ?, CAST(? AS TIMESTAMP), ?)${conflict};`
+        : `INSERT INTO features_json(id, geom_type, coordinates, properties, style, layer_id, created_at, insertion_order)
+           VALUES (?, ?, CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), ?, CAST(? AS TIMESTAMP), ?)${conflict};`;
     const statement = await this.connection.prepare(sql);
     try {
       if (this.capabilities.store === "spatial") {
@@ -317,7 +334,8 @@ export class GeometryRepository {
           JSON.stringify(feature.properties),
           JSON.stringify(feature.style),
           feature.layerId,
-          feature.createdAt
+          feature.createdAt,
+          insertionOrder
         );
       } else {
         await statement.query(
@@ -327,7 +345,8 @@ export class GeometryRepository {
           JSON.stringify(feature.properties),
           JSON.stringify(feature.style),
           feature.layerId,
-          feature.createdAt
+          feature.createdAt,
+          insertionOrder
         );
       }
     } finally {
@@ -363,7 +382,7 @@ export class GeometryRepository {
   async deleteLatestFeature(): Promise<void> {
     const table = this.capabilities.store === "spatial" ? "features" : "features_json";
     await this.connection.query(
-      `DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} ORDER BY inserted_at DESC, id DESC LIMIT 1);`
+      `DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} ORDER BY insertion_order DESC, id DESC LIMIT 1);`
     );
     await this.checkpoint();
   }
@@ -430,6 +449,15 @@ export class GeometryRepository {
     }
   }
 
+  private async nextInsertionOrder(): Promise<number> {
+    const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+    const rows = await this.connection.query(
+      `SELECT COALESCE(MAX(insertion_order), 0) + 1 AS next_order FROM ${table};`
+    );
+    const row = rows.toArray()[0]?.toJSON() as Row | undefined;
+    return Number(row?.next_order ?? 1);
+  }
+
   private async initializeSchemaVersion(): Promise<number> {
     const stored = await this.metadataValue("schema_version");
     if (stored === undefined) {
@@ -449,7 +477,7 @@ export class GeometryRepository {
       await this.setMetadata("schema_version", String(CURRENT_SCHEMA_VERSION));
       return CURRENT_SCHEMA_VERSION;
     }
-    if (version === 1) return version;
+    if (version === 1 || version === 2) return version;
     if (version !== CURRENT_SCHEMA_VERSION) throw new Error(`Unsupported schema version: ${version}`);
     return version;
   }

@@ -237,7 +237,7 @@ describe("transactional GeoJSON import", () => {
     await repository.importGeoJSON([DEFAULT_LAYER], [feature]);
 
     expect(connection.query).toHaveBeenNthCalledWith(1, "BEGIN TRANSACTION;");
-    expect(connection.query).toHaveBeenNthCalledWith(2, "COMMIT;");
+    expect(connection.query).toHaveBeenCalledWith("COMMIT;");
   });
 
   it("途中failure時にrollbackし元errorを保持する", async () => {
@@ -307,7 +307,6 @@ describe("OPFS durability", () => {
 
     await repository.insertFeature(feature);
 
-    expect(checkpoint).toHaveBeenCalledOnce();
     expect(checkpoint).toHaveBeenCalledWith("CHECKPOINT;");
   });
 
@@ -328,12 +327,20 @@ describe("OPFS durability", () => {
 
     await repository.importGeoJSON([DEFAULT_LAYER], [feature]);
 
-    expect(query.mock.calls.map(([sql]) => sql)).toEqual(["BEGIN TRANSACTION;", "COMMIT;", "CHECKPOINT;"]);
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      "BEGIN TRANSACTION;",
+      "SELECT COALESCE(MAX(insertion_order), 0) + 1 AS next_order FROM features_json;",
+      "COMMIT;",
+      "CHECKPOINT;",
+    ]);
   });
 
   it("CHECKPOINT失敗は書込み成功を明示するdiagnostic errorにする", async () => {
     const connection = {
-      query: vi.fn().mockRejectedValue(new Error("disk full")),
+      query: vi.fn(async (sql: string) => {
+        if (sql === "CHECKPOINT;") throw new Error("disk full");
+        return result();
+      }),
       prepare: vi.fn(async (sql: string) => ({
         query: vi.fn().mockResolvedValue(sql.startsWith("SELECT 1 AS present") ? result([{ present: 1 }]) : result()),
         close: vi.fn().mockResolvedValue(undefined),
@@ -404,9 +411,9 @@ describe("schema metadata", () => {
     expect(metadata.get("schema_version")).toBe(String(CURRENT_SCHEMA_VERSION));
   });
 
-  it("schema version 1へinserted_atを追加して現versionへ更新する", async () => {
+  it.each([1, 2])("schema version %sをinsertion_order付き現versionへ更新する", async (version) => {
     const metadata = new Map<string, string>([
-      ["schema_version", "1"],
+      ["schema_version", String(version)],
       ["active_feature_store", "json"],
       ["legacy_strokes_migrated", "true"],
     ]);
@@ -428,7 +435,15 @@ describe("schema metadata", () => {
 
     await new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize();
 
-    expect(query.mock.calls.some(([sql]) => String(sql).includes("ADD COLUMN IF NOT EXISTS inserted_at"))).toBe(true);
+    expect(query.mock.calls.some(([sql]) => String(sql).includes("ADD COLUMN IF NOT EXISTS inserted_at"))).toBe(
+      version === 1
+    );
+    expect(query.mock.calls.some(([sql]) => String(sql).includes("ADD COLUMN IF NOT EXISTS insertion_order"))).toBe(
+      true
+    );
+    expect(
+      query.mock.calls.some(([sql]) => String(sql).includes("ROW_NUMBER() OVER (ORDER BY inserted_at ASC, id ASC)"))
+    ).toBe(true);
     expect(metadata.get("schema_version")).toBe(String(CURRENT_SCHEMA_VERSION));
   });
 
@@ -720,7 +735,7 @@ describe("legacy migration row isolation", () => {
 });
 
 describe("undo insertion order", () => {
-  it.each(["spatial", "json"] as const)("%s Undoはcanonical created_atではなくinserted_atを使う", async (store) => {
+  it.each(["spatial", "json"] as const)("%s Undoはinsertion_orderを使う", async (store) => {
     const query = vi.fn().mockResolvedValue(result());
     const repository = new GeometryRepository({ query } as unknown as AsyncDuckDBConnection, {
       opfs: false,
@@ -730,8 +745,44 @@ describe("undo insertion order", () => {
 
     await repository.deleteLatestFeature();
 
-    expect(String(query.mock.calls[0][0])).toContain("ORDER BY inserted_at DESC");
+    expect(String(query.mock.calls[0][0])).toContain("ORDER BY insertion_order DESC");
     expect(String(query.mock.calls[0][0])).not.toContain("ORDER BY created_at DESC");
+  });
+
+  it.each(["spatial", "json"] as const)("%s 複数feature importへfile順のorderを割り当てる", async (store) => {
+    let nextOrder = 1;
+    const insertedOrders: number[] = [];
+    const connection = {
+      query: vi.fn(async (sql: string) =>
+        sql.includes("MAX(insertion_order)") ? result([{ next_order: nextOrder++ }]) : result()
+      ),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT 1 AS present")) return result([{ present: 1 }]);
+          if (sql.startsWith("INSERT INTO features")) insertedOrders.push(Number(args.at(-1)));
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: false,
+      spatial: store === "spatial",
+      store,
+    });
+    const geometry: FeatureGeometry = {
+      type: "LineString",
+      coordinates: [
+        [0, 0],
+        [1, 1],
+      ],
+    };
+    const first = createGeometryFeature({ id: "first", geometry });
+    const second = createGeometryFeature({ id: "second", geometry });
+
+    await repository.importGeoJSON([DEFAULT_LAYER], [first, second]);
+
+    expect(insertedOrders).toEqual([1, 2]);
   });
 });
 
