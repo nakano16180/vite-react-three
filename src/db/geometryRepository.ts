@@ -416,7 +416,20 @@ export class GeometryRepository {
   }
 
   async clearFeatures(): Promise<void> {
-    await this.connection.query(`DELETE FROM ${this.capabilities.store === "spatial" ? "features" : "features_json"};`);
+    const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      await this.connection.query(`DELETE FROM ${table};`);
+      await this.connection.query(`DELETE FROM layers WHERE id <> '${DEFAULT_LAYER_ID}';`);
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the clear failure; rollback is best-effort.
+      }
+      throw error;
+    }
     await this.checkpoint();
   }
 

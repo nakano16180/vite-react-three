@@ -868,6 +868,43 @@ describe("undo insertion order", () => {
   });
 });
 
+describe("transactional clear", () => {
+  it.each(["spatial", "json"] as const)("%s Clearはfeatureとcustom layerを同じtransactionで削除する", async (store) => {
+    const query = vi.fn().mockResolvedValue(result());
+    const repository = new GeometryRepository({ query } as unknown as AsyncDuckDBConnection, {
+      opfs: false,
+      spatial: store === "spatial",
+      store,
+    });
+
+    await repository.clearFeatures();
+
+    expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+      "BEGIN TRANSACTION;",
+      `DELETE FROM ${store === "spatial" ? "features" : "features_json"};`,
+      `DELETE FROM layers WHERE id <> '${DEFAULT_LAYER_ID}';`,
+      "COMMIT;",
+    ]);
+  });
+
+  it("layer削除失敗時はfeature削除もrollbackする", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.startsWith("DELETE FROM layers")) throw new Error("layer delete failed");
+      return result();
+    });
+    const repository = new GeometryRepository({ query } as unknown as AsyncDuckDBConnection, {
+      opfs: false,
+      spatial: false,
+      store: "json",
+    });
+
+    await expect(repository.clearFeatures()).rejects.toThrow("layer delete failed");
+
+    expect(query).toHaveBeenCalledWith("ROLLBACK;");
+    expect(query).not.toHaveBeenCalledWith("COMMIT;");
+  });
+});
+
 describe("layer invariant", () => {
   it.each(["spatial", "json"] as const)("%s insertは存在しないlayerをrejectする", async (store) => {
     const connection = {
