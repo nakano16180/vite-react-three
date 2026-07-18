@@ -599,10 +599,9 @@ Spatial geometry conversion uses:
 ```sql
 ST_GeomFromText(CAST(? AS VARCHAR))
 ST_AsGeoJSON(geom)
-ST_Simplify(geom, ?)
 ```
 
-JSON store writes canonical `FeatureGeometry.coordinates` directly. `updateGeometry()` preserves ID, properties, style, layer, and createdAt.
+JSON store writes canonical `FeatureGeometry.coordinates` directly. `updateGeometry()` preserves ID, properties, style, layer, and createdAt. 描画時のsimplifyはrepositoryの外にあるTypeScript共通純粋関数で実行し、両storeへ同じcanonical geometryを渡す。`ST_Simplify` はこの永続化経路では使用しない。
 
 - [ ] **Step 5: row mapping testと全unit testを実行する**
 
@@ -652,6 +651,7 @@ git commit -m "feat: add DuckDB geometry repository"
 - Produces:
   - `RenderableStroke`
   - `toRenderableStroke(feature: GeometryFeature): RenderableStroke`
+  - `simplifyFeatureGeometry(geometry: FeatureGeometry, tolerance: number): FeatureGeometry`
   - `useGeometryFeatures(strokeColor, strokeWidth, simplifyOn)`
   - `storageStatus: { opfs; spatial; store; migrationWarning?; error? }`
 
@@ -723,7 +723,8 @@ Move UI orchestration from `useDuckDBStrokes.ts` to `useGeometryFeatures.ts`:
 - initialize DB/repository in one effect and close connection/worker on cleanup;
 - keep `features`, `layers`, `loading`, and `storageStatus` in state;
 - derive `strokes = features.map(toRenderableStroke)`;
-- `persistStroke(points, geomType)` constructs a canonical feature in `DEFAULT_LAYER_ID`;
+- `simplifyFeatureGeometry()` はDouglas-Peucker法をLineStringへ適用し、Polygonでは開いたringのまま各頂点を処理して最低3点を維持する。toleranceが0以下なら同じ座標値のcopyを返す;
+- `persistStroke(points, geomType)` は `simplifyOn` のとき `Math.max(0, Math.min(strokeWidth * 0.3, 3))` をtoleranceとして共通simplifierを適用し、結果から `DEFAULT_LAYER_ID` のcanonical featureを作る;
 - `updateStroke(id, points)` calls `repository.updateGeometry`;
 - undo/clear/refresh call repository methods;
 - import parses file with `importFeatureCollection`, inserts layers then features, and reports skipped feature count;

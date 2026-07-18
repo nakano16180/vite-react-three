@@ -143,6 +143,8 @@ Spatialを利用できない場合、`features_json` は次の列を持つ。
 
 この段階ではforeign key enforcementを必須としない。repository writeではlayer IDの存在を検証し、現在のwriteはすべてDefaultレイヤーを使用する。
 
+描画時のsimplifyはstoreへ保存する前にTypeScriptの共通純粋関数で行い、Spatial / JSONの両storeへ同じcanonical geometryを渡す。repositoryのCRUDではgeometryを追加変換しない。`ST_Simplify` は将来、生成SQLを明示するSpatial operationとして導入し、この永続化経路では使用しない。
+
 ## 初期化とLegacy Migration
 
 初期化は次の順序で行う。
