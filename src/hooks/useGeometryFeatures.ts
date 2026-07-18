@@ -11,6 +11,7 @@ import {
 } from "../domain/geometryFeature";
 import { simplifyFeatureGeometry, toRenderableStroke } from "../domain/renderableStroke";
 import { exportFeatureCollection, importFeatureCollection } from "../lib/geojson";
+import { createPromiseQueue } from "../lib/promiseQueue";
 
 export type GeometryType = "line" | "polygon";
 
@@ -26,91 +27,104 @@ const errorMessage = (error: unknown): string => (error instanceof Error ? error
 
 export function useGeometryFeatures(strokeColor: string, strokeWidth: number, simplifyOn: boolean) {
   const repositoryRef = useRef<GeometryRepository | null>(null);
+  const generationRef = useRef(0);
+  const queueRef = useRef(createPromiseQueue());
   const [features, setFeatures] = useState<GeometryFeature[]>([]);
   const [layers, setLayers] = useState<Layer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [operationNotice, setOperationNotice] = useState<string>();
   const [storageStatus, setStorageStatus] = useState<StorageStatus>({
     opfs: false,
     spatial: false,
     store: "json",
   });
 
-  const loadRepositoryState = useCallback(async (repository: GeometryRepository) => {
+  const loadRepositoryState = useCallback(async (repository: GeometryRepository, generation: number) => {
     const [nextFeatures, nextLayers] = await Promise.all([repository.listFeatures(), repository.listLayers()]);
+    if (generationRef.current !== generation || repositoryRef.current !== repository) return false;
     setFeatures(nextFeatures);
     setLayers(nextLayers);
     setStorageStatus((current) => ({ ...current, error: undefined }));
+    return true;
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    const enqueue = queueRef.current;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     let ownedContext: DuckDBContext | null = null;
+    let cleanupPromise: Promise<void> | null = null;
+    const isCurrent = () => generationRef.current === generation;
+    const cleanupContext = () => {
+      if (cleanupPromise) return cleanupPromise;
+      const context = ownedContext;
+      ownedContext = null;
+      cleanupPromise = context
+        ? context.connection
+            .close()
+            .catch(() => undefined)
+            .then(() => context.db.terminate().catch(() => undefined))
+        : Promise.resolve();
+      return cleanupPromise;
+    };
 
-    void (async () => {
-      setLoading(true);
+    setLoading(true);
+    void enqueue(async () => {
       try {
         const context = await createDuckDB();
         ownedContext = context;
-        if (cancelled) return;
+        if (!isCurrent()) return;
 
         const repository = new GeometryRepository(context.connection, context.capabilities);
         const { migrationWarning } = await repository.initialize();
-        if (cancelled) return;
+        if (!isCurrent()) return;
 
         repositoryRef.current = repository;
         setStorageStatus({ ...context.capabilities, migrationWarning });
-        await loadRepositoryState(repository);
+        await loadRepositoryState(repository, generation);
       } catch (error) {
-        if (!cancelled) {
+        if (isCurrent()) {
           setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
         }
       } finally {
-        if (!cancelled) setLoading(false);
-        if (cancelled && ownedContext) {
-          await ownedContext.connection.close().catch(() => undefined);
-          await ownedContext.db.terminate().catch(() => undefined);
-          ownedContext = null;
-        }
+        if (isCurrent()) setLoading(false);
+        else await cleanupContext();
       }
-    })();
+    });
 
     return () => {
-      cancelled = true;
+      if (generationRef.current === generation) generationRef.current += 1;
       repositoryRef.current = null;
-      if (ownedContext) {
-        const context = ownedContext;
-        ownedContext = null;
-        void context.connection
-          .close()
-          .catch(() => undefined)
-          .finally(() => context.db.terminate().catch(() => undefined));
-      }
+      void enqueue(cleanupContext);
     };
   }, [loadRepositoryState]);
 
   const runRepositoryAction = useCallback(
-    async (action: (repository: GeometryRepository) => Promise<void>) => {
-      const repository = repositoryRef.current;
-      if (!repository) return;
-      try {
-        await action(repository);
-        await loadRepositoryState(repository);
-      } catch (error) {
-        setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
-      }
-    },
+    (action: (repository: GeometryRepository) => Promise<void>, onSuccess?: () => void) =>
+      queueRef.current(async () => {
+        const repository = repositoryRef.current;
+        const generation = generationRef.current;
+        if (!repository) return false;
+        setOperationNotice(undefined);
+        try {
+          await action(repository);
+          const loaded = await loadRepositoryState(repository, generation);
+          if (loaded) onSuccess?.();
+          return loaded;
+        } catch (error) {
+          if (generationRef.current === generation && repositoryRef.current === repository) {
+            setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
+          }
+          return false;
+        }
+      }),
     [loadRepositoryState]
   );
 
-  const handleRefresh = useCallback(async () => {
-    const repository = repositoryRef.current;
-    if (!repository) return;
-    try {
-      await loadRepositoryState(repository);
-    } catch (error) {
-      setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
-    }
-  }, [loadRepositoryState]);
+  const handleRefresh = useCallback(
+    () => runRepositoryAction(async () => undefined).then(() => undefined),
+    [runRepositoryAction]
+  );
 
   const handleUndo = useCallback(
     () => runRepositoryAction((repository) => repository.deleteLatestFeature()),
@@ -156,40 +170,49 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) return;
+      const generation = generationRef.current;
+      setOperationNotice(undefined);
       try {
-        const imported = importFeatureCollection(JSON.parse(await file.text()), new Set(features.map(({ id }) => id)));
-        await runRepositoryAction(async (repository) => {
-          await repository.insertLayers(imported.layers);
-          for (const feature of imported.features) await repository.insertFeature(feature);
-        });
-        if (imported.warnings.length > 0) {
-          setStorageStatus((current) => ({
-            ...current,
-            migrationWarning: `GeoJSON import: ${imported.warnings.length}件をスキップしました。`,
-          }));
-        }
+        const contents = await file.text();
+        if (generationRef.current !== generation || !repositoryRef.current) return;
+        const imported = importFeatureCollection(JSON.parse(contents), new Set(features.map(({ id }) => id)));
+        await runRepositoryAction(
+          (repository) => repository.importGeoJSON(imported.layers, imported.features),
+          imported.warnings.length > 0
+            ? () => setOperationNotice(`GeoJSON import: ${imported.warnings.length}件をスキップしました。`)
+            : undefined
+        );
       } catch (error) {
-        setStorageStatus((current) => ({ ...current, error: `GeoJSON import failed: ${errorMessage(error)}` }));
+        if (generationRef.current === generation && repositoryRef.current) {
+          setOperationNotice(undefined);
+          setStorageStatus((current) => ({ ...current, error: `GeoJSON import failed: ${errorMessage(error)}` }));
+        }
       }
     },
     [features, runRepositoryAction]
   );
 
   const handleExportGeoJSON = useCallback(async () => {
+    let url: string | undefined;
+    let anchor: HTMLAnchorElement | undefined;
+    setOperationNotice(undefined);
     try {
       const blob = new Blob([JSON.stringify(exportFeatureCollection(features, layers), null, 2)], {
         type: "application/geo+json",
       });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
+      url = URL.createObjectURL(blob);
+      anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = `strokes-${new Date().toISOString().slice(0, 10)}.geojson`;
       document.body.appendChild(anchor);
       anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
     } catch (error) {
-      setStorageStatus((current) => ({ ...current, error: `GeoJSON export failed: ${errorMessage(error)}` }));
+      if (repositoryRef.current) {
+        setStorageStatus((current) => ({ ...current, error: `GeoJSON export failed: ${errorMessage(error)}` }));
+      }
+    } finally {
+      anchor?.remove();
+      if (url) URL.revokeObjectURL(url);
     }
   }, [features, layers]);
 
@@ -199,6 +222,7 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     features,
     layers,
     loading,
+    operationNotice,
     storageStatus,
     strokes,
     persistStroke,

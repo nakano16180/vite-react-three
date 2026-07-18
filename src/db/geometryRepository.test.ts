@@ -1,6 +1,11 @@
 import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_LAYER_ID, type FeatureGeometry } from "../domain/geometryFeature";
+import {
+  DEFAULT_LAYER,
+  DEFAULT_LAYER_ID,
+  createGeometryFeature,
+  type FeatureGeometry,
+} from "../domain/geometryFeature";
 import { mapSpatialFeatureRow, mergeLegacyFeatures, mapJsonFeatureRow, mapLegacyJsonRow } from "./geometryRepository";
 import { GeometryRepository } from "./geometryRepository";
 
@@ -182,5 +187,74 @@ describe("legacy migration precedence", () => {
     };
 
     expect(mergeLegacyFeatures([jsonFeature], [spatialFeature])).toEqual([spatialFeature]);
+  });
+});
+
+describe("transactional GeoJSON import", () => {
+  it("layers/featuresを単一transactionでcommitする", async () => {
+    const statementQuery = vi.fn().mockResolvedValue({ toArray: () => [] });
+    const connection = {
+      query: vi.fn().mockResolvedValue({ toArray: () => [] }),
+      prepare: vi.fn().mockResolvedValue({
+        query: statementQuery,
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: false,
+      spatial: false,
+      store: "json",
+    });
+    const feature = createGeometryFeature({
+      id: "import-1",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      },
+    });
+
+    await repository.importGeoJSON([DEFAULT_LAYER], [feature]);
+
+    expect(connection.query).toHaveBeenNthCalledWith(1, "BEGIN TRANSACTION;");
+    expect(connection.query).toHaveBeenNthCalledWith(2, "COMMIT;");
+  });
+
+  it("途中failure時にrollbackし元errorを保持する", async () => {
+    const statementQuery = vi
+      .fn()
+      .mockResolvedValueOnce({ toArray: () => [] })
+      .mockRejectedValueOnce(new Error("feature insert failed"));
+    const connection = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === "ROLLBACK;") throw new Error("rollback failed");
+        return { toArray: () => [] };
+      }),
+      prepare: vi.fn().mockResolvedValue({
+        query: statementQuery,
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: false,
+      spatial: false,
+      store: "json",
+    });
+    const feature = createGeometryFeature({
+      id: "import-1",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      },
+    });
+
+    await expect(repository.importGeoJSON([DEFAULT_LAYER], [feature])).rejects.toThrow("feature insert failed");
+    expect(connection.query).toHaveBeenCalledWith("ROLLBACK;");
+    expect(connection.query).not.toHaveBeenCalledWith("COMMIT;");
   });
 });

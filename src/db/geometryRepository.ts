@@ -330,6 +330,22 @@ export class GeometryRepository {
     }
   }
 
+  async importGeoJSON(layers: Layer[], features: GeometryFeature[]): Promise<void> {
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      await this.insertLayers(layers);
+      for (const feature of features) await this.insertFeature(feature);
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the import failure; rollback is best-effort.
+      }
+      throw error;
+    }
+  }
+
   private async legacyTables(): Promise<Set<string>> {
     const statement = await this.connection.prepare(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = ? AND table_name IN (?, ?);"

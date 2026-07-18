@@ -14,6 +14,7 @@ type InteractionMode = "draw" | "pan" | "edit" | "measure";
 interface WorkspaceProps {
   interactionMode: InteractionMode;
   loading: boolean;
+  operationNotice?: string;
   storageStatus: StorageStatus;
   strokeColor: string;
   strokeWidth: number;
@@ -25,6 +26,7 @@ interface WorkspaceProps {
 function Workspace({
   interactionMode,
   loading,
+  operationNotice,
   storageStatus,
   strokeColor,
   strokeWidth,
@@ -81,6 +83,11 @@ function Workspace({
             {storageStatus.migrationWarning}
           </div>
         )}
+        {operationNotice && (
+          <div className="workspace-warning-overlay" data-testid="storage-operation-notice" role="status">
+            {operationNotice}
+          </div>
+        )}
         {storageStatus.error && (
           <div className="workspace-warning-overlay" data-testid="storage-error" role="alert">
             {storageStatus.error}
@@ -129,6 +136,7 @@ export default function App() {
     handleRefresh,
     handleUndo,
     loading,
+    operationNotice,
     persistStroke,
     storageStatus,
     strokes,
@@ -165,6 +173,7 @@ export default function App() {
       <Workspace
         interactionMode={interactionMode}
         loading={loading}
+        operationNotice={operationNotice}
         storageStatus={storageStatus}
         strokeColor={strokeColor}
         strokeWidth={strokeWidth}
