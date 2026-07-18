@@ -15,6 +15,7 @@ interface HeaderProps {
   handleRefresh: () => void;
   handleClear: () => void;
   handleExportGeoJSON: () => void;
+  exportDisabled: boolean;
   handleImportGeoJSON: (event: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
@@ -31,6 +32,7 @@ export function Header({
   handleRefresh,
   handleClear,
   handleExportGeoJSON,
+  exportDisabled,
   handleImportGeoJSON,
 }: HeaderProps) {
   return (
@@ -181,7 +183,7 @@ export function Header({
             flexWrap: "wrap",
           }}
         >
-          <button onClick={handleExportGeoJSON} style={{ fontSize: 12 }}>
+          <button disabled={exportDisabled} onClick={handleExportGeoJSON} style={{ fontSize: 12 }}>
             Export GeoJSON
           </button>
           <label
