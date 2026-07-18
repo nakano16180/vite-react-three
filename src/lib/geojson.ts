@@ -94,7 +94,15 @@ const canonicalGeometry = (value: unknown): FeatureGeometry | null => {
     value.type === "Polygon" && value.coordinates.length === 1
       ? { type: "Polygon", coordinates: value.coordinates[0] }
       : { type: value.type, coordinates: value.coordinates };
-  return isFeatureGeometry(candidate) ? candidate : null;
+  if (!isFeatureGeometry(candidate)) return null;
+  if (candidate.type === "LineString") return candidate;
+
+  const coordinates = candidate.coordinates.map(copyPoint);
+  const first = coordinates[0];
+  const last = coordinates.at(-1);
+  if (last && first[0] === last[0] && first[1] === last[1]) coordinates.pop();
+  const normalized = { type: "Polygon", coordinates };
+  return isFeatureGeometry(normalized) ? normalized : null;
 };
 
 const readProperties = (value: unknown): Record<string, JsonValue> => {
@@ -102,7 +110,12 @@ const readProperties = (value: unknown): Record<string, JsonValue> => {
   const properties: Record<string, JsonValue> = {};
   for (const [key, entry] of Object.entries(value)) {
     if (!["id", "color", "width", "geomType"].includes(key) && isJsonValue(entry)) {
-      properties[key] = entry;
+      Object.defineProperty(properties, key, {
+        value: entry,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
   }
   return properties;
@@ -138,7 +151,7 @@ export const importFeatureCollection = (
   }
 
   const rawLayers = isRecord(input.workbench) ? input.workbench.layers : undefined;
-  const layers =
+  const layers: Layer[] =
     Array.isArray(rawLayers) && rawLayers.length > 0 && rawLayers.every(isLayer)
       ? rawLayers.map((layer) => ({ ...layer }))
       : [DEFAULT_LAYER];
@@ -167,6 +180,10 @@ export const importFeatureCollection = (
         };
     const requestedLayerId =
       typeof metadata.layerId === "string" && layerIds.has(metadata.layerId) ? metadata.layerId : DEFAULT_LAYER_ID;
+    if (requestedLayerId === DEFAULT_LAYER_ID && !layerIds.has(DEFAULT_LAYER_ID)) {
+      layers.push(DEFAULT_LAYER);
+      layerIds.add(DEFAULT_LAYER_ID);
+    }
 
     features.push(
       createGeometryFeature({

@@ -84,6 +84,82 @@ describe("GeoJSON codec", () => {
     expect(imported.warnings).toHaveLength(1);
   });
 
+  it("閉環除去後に頂点不足となるPolygonをwarning付きでskipする", () => {
+    const imported = importFeatureCollection({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [0, 0],
+                [1, 1],
+                [0, 0],
+              ],
+            ],
+          },
+          properties: {},
+        },
+        {
+          type: "Feature",
+          id: "valid-line",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [0, 0],
+              [1, 1],
+            ],
+          },
+          properties: {},
+        },
+      ],
+    });
+
+    expect(imported.features).toHaveLength(1);
+    expect(imported.features[0].id).toBe("valid-line");
+    expect(imported.warnings).toHaveLength(1);
+  });
+
+  it("custom layerがあってもfallbackされたDEFAULT_LAYERを返却layersへ追加する", () => {
+    const customLayer = { ...DEFAULT_LAYER, id: "custom", name: "Custom" };
+    const imported = importFeatureCollection({
+      type: "FeatureCollection",
+      workbench: { layers: [customLayer] },
+      features: [
+        {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [0, 0],
+              [1, 1],
+            ],
+          },
+          properties: {},
+          workbench: { layerId: "missing" },
+        },
+      ],
+    });
+
+    expect(imported.features[0].layerId).toBe(DEFAULT_LAYER.id);
+    expect(imported.layers).toEqual([customLayer, DEFAULT_LAYER]);
+  });
+
+  it("__proto__ propertyを通常のJSON dataとして保持する", () => {
+    const input = JSON.parse(`{
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [[0, 0], [1, 1]] },
+      "properties": { "__proto__": { "safe": true }, "label": "kept" }
+    }`) as unknown;
+    const properties = importFeatureCollection(input).features[0].properties;
+
+    expect(Object.hasOwn(properties, "__proto__")).toBe(true);
+    expect(properties["__proto__"]).toEqual({ safe: true });
+    expect(properties.label).toBe("kept");
+  });
+
   it("existingIdsとfile内のID衝突を回避する", () => {
     const imported = importFeatureCollection(
       {
@@ -119,6 +195,43 @@ describe("GeoJSON codec", () => {
     );
     expect(new Set(imported.features.map(({ id }) => id)).size).toBe(2);
     expect(imported.features.every(({ id }) => id !== "duplicate")).toBe(true);
+  });
+
+  it("衝突しないIDを保持しlegacy properties.idの衝突も回避する", () => {
+    const imported = importFeatureCollection(
+      {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: "kept",
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [0, 0],
+                [1, 1],
+              ],
+            },
+            properties: {},
+          },
+          {
+            type: "Feature",
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [1, 1],
+                [2, 2],
+              ],
+            },
+            properties: { id: "legacy-existing" },
+          },
+        ],
+      },
+      new Set(["legacy-existing"])
+    );
+
+    expect(imported.features[0].id).toBe("kept");
+    expect(imported.features[1].id).not.toBe("legacy-existing");
   });
 
   it("exportでは参照されたlayerだけを保存する", () => {
