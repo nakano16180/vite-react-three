@@ -421,6 +421,30 @@ describe("schema metadata", () => {
       new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
     ).rejects.toThrow("Unsupported future schema version");
   });
+
+  it("future schemaはcanonical DDLやmetadata mutationより前にfail closedする", async () => {
+    const query = vi.fn().mockResolvedValue(result());
+    const metadataWrite = vi.fn().mockResolvedValue(result());
+    const connection = {
+      query,
+      prepare: vi.fn(async (sql: string) => ({
+        query: sql.startsWith("SELECT value")
+          ? vi.fn().mockResolvedValue(result([{ value: String(CURRENT_SCHEMA_VERSION + 1) }]))
+          : metadataWrite,
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await expect(
+      new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
+    ).rejects.toThrow("Unsupported future schema version");
+
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(String(query.mock.calls[0][0])).toContain("CREATE TABLE IF NOT EXISTS app_metadata");
+    expect(String(query.mock.calls[0][0])).not.toContain("layers");
+    expect(String(query.mock.calls[0][0])).not.toContain("features");
+    expect(metadataWrite).not.toHaveBeenCalled();
+  });
 });
 
 describe("legacy migration row isolation", () => {
@@ -493,6 +517,76 @@ describe("legacy migration row isolation", () => {
       new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
     ).resolves.toEqual({ migrationWarning: "Legacy stroke migration skipped 2 invalid rows." });
     expect(insertedIds).toEqual(["valid", "valid-spatial"]);
+    expect(metadata.get("legacy_strokes_migrated")).toBe("true");
+    expect(connection.query).toHaveBeenCalledWith("COMMIT;");
+  });
+
+  it("valid geometryのinvalid created_atはfallbackし正常rowと同じtransactionでcommitする", async () => {
+    const metadata = new Map<string, string>([["schema_version", String(CURRENT_SCHEMA_VERSION)]]);
+    const inserted = new Map<string, string>();
+    const connection = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.includes("FROM strokes_json")) {
+          return result([
+            {
+              id: "invalid-date",
+              coords: "[[0,0],[2,2]]",
+              color: "#111111",
+              width: 2,
+              geom_type: "line",
+              created_at: null,
+            },
+            {
+              id: "valid-date",
+              coords: "[[3,3],[4,4]]",
+              color: "#222222",
+              width: 3,
+              geom_type: "line",
+              created_at: "2026-07-18T00:00:00.000Z",
+            },
+          ]);
+        }
+        if (sql.includes("FROM strokes ORDER BY")) {
+          return result([
+            {
+              id: "invalid-spatial-date",
+              geometry: '{"type":"LineString","coordinates":[[5,5],[6,6]]}',
+              color: "#333333",
+              width: 4,
+              geom_type: "line",
+              created_at: "",
+            },
+          ]);
+        }
+        return result();
+      }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.includes("information_schema.tables")) {
+            return result([{ table_name: "strokes_json" }, { table_name: "strokes" }]);
+          }
+          if (sql.startsWith("INSERT INTO app_metadata")) metadata.set(String(args[0]), String(args[1]));
+          if (sql.startsWith("SELECT 1 AS present")) return result([{ present: 1 }]);
+          if (sql.startsWith("INSERT INTO features_json")) inserted.set(String(args[0]), String(args[6]));
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await expect(
+      new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize()
+    ).resolves.toEqual({
+      migrationWarning: "Legacy stroke migration replaced 2 invalid created_at values.",
+    });
+    expect(inserted.size).toBe(3);
+    expect(Number.isFinite(Date.parse(inserted.get("invalid-date") ?? ""))).toBe(true);
+    expect(Number.isFinite(Date.parse(inserted.get("invalid-spatial-date") ?? ""))).toBe(true);
+    expect(inserted.get("valid-date")).toBe("2026-07-18T00:00:00.000Z");
     expect(metadata.get("legacy_strokes_migrated")).toBe("true");
     expect(connection.query).toHaveBeenCalledWith("COMMIT;");
   });

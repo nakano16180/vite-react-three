@@ -47,10 +47,14 @@ export interface LegacyJsonRow extends Row {
 
 const stringValue = (value: unknown): string => (value == null ? "" : String(value));
 const jsonValue = <T>(value: unknown): T => JSON.parse(stringValue(value)) as T;
+const isValidTimestamp = (value: unknown): boolean => {
+  if (value instanceof Date) return Number.isFinite(value.valueOf());
+  const text = stringValue(value).trim();
+  return text.length > 0 && Number.isFinite(Date.parse(text));
+};
 const isoTimestamp = (value: unknown): string => {
-  if (value instanceof Date) return value.toISOString();
-  const date = new Date(stringValue(value));
-  return Number.isNaN(date.valueOf()) ? stringValue(value) : date.toISOString();
+  if (!isValidTimestamp(value)) return new Date().toISOString();
+  return (value instanceof Date ? value : new Date(stringValue(value))).toISOString();
 };
 
 const geometryFromParts = (type: unknown, coordinates: unknown): FeatureGeometry => {
@@ -145,6 +149,9 @@ export class GeometryRepository {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+    `);
+    await this.initializeSchemaVersion();
+    await this.connection.query(`
       CREATE TABLE IF NOT EXISTS layers (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -178,12 +185,12 @@ export class GeometryRepository {
       `);
     }
     await this.insertMetadataIfAbsent("active_feature_store", this.capabilities.store);
-    await this.initializeSchemaVersion();
     await this.insertLayers([DEFAULT_LAYER], true);
 
     await this.connection.query("BEGIN TRANSACTION;");
     let committed = false;
     let skippedRows = 0;
+    let replacedCreatedAtValues = 0;
     try {
       const migrated = await this.metadataValue("legacy_strokes_migrated");
       if (migrated !== "true") {
@@ -196,7 +203,10 @@ export class GeometryRepository {
           );
           for (const row of rows.toArray()) {
             try {
-              jsonFeatures.push(mapLegacyJsonRow(row.toJSON() as LegacyJsonRow));
+              const value = row.toJSON() as LegacyJsonRow;
+              const feature = mapLegacyJsonRow(value);
+              if (!isValidTimestamp(value.created_at)) replacedCreatedAtValues += 1;
+              jsonFeatures.push(feature);
             } catch {
               skippedRows += 1;
             }
@@ -209,14 +219,16 @@ export class GeometryRepository {
           for (const row of rows.toArray()) {
             try {
               const value = row.toJSON() as Row;
-              spatialFeatures.push({
+              const feature: GeometryFeature = {
                 id: stringValue(value.id),
                 geometry: geometryFromGeoJson(value.geometry),
                 properties: {},
                 style: createDefaultStyle(stringValue(value.color) || "#222222", Number(value.width) || 4),
                 layerId: DEFAULT_LAYER_ID,
                 createdAt: isoTimestamp(value.created_at),
-              });
+              };
+              if (!isValidTimestamp(value.created_at)) replacedCreatedAtValues += 1;
+              spatialFeatures.push(feature);
             } catch {
               skippedRows += 1;
             }
@@ -230,13 +242,20 @@ export class GeometryRepository {
       await this.connection.query("COMMIT;");
       committed = true;
       await this.checkpoint();
-      return skippedRows
-        ? {
-            migrationWarning: `Legacy stroke migration skipped ${skippedRows} invalid ${
-              skippedRows === 1 ? "row" : "rows"
-            }.`,
-          }
-        : {};
+      const diagnostics: string[] = [];
+      if (skippedRows) {
+        diagnostics.push(
+          `Legacy stroke migration skipped ${skippedRows} invalid ${skippedRows === 1 ? "row" : "rows"}.`
+        );
+      }
+      if (replacedCreatedAtValues) {
+        diagnostics.push(
+          `Legacy stroke migration replaced ${replacedCreatedAtValues} invalid created_at ${
+            replacedCreatedAtValues === 1 ? "value" : "values"
+          }.`
+        );
+      }
+      return diagnostics.length ? { migrationWarning: diagnostics.join(" ") } : {};
     } catch (error) {
       if (committed) {
         return {
