@@ -223,6 +223,9 @@ export class GeometryRepository {
         let jsonMigrated = (await this.metadataValue("legacy_strokes_json_migrated")) === "true";
         let spatialMigrated = (await this.metadataValue("legacy_strokes_spatial_migrated")) === "true";
         if (!jsonMigrated && tables.has("strokes_json")) {
+          await this.connection.query(
+            "ALTER TABLE strokes_json ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';"
+          );
           const rows = await this.connection.query(
             "SELECT id, coords, color, width, geom_type, created_at FROM strokes_json ORDER BY created_at ASC;"
           );
@@ -243,6 +246,9 @@ export class GeometryRepository {
         }
         const spatialMigrationPending = !spatialMigrated && tables.has("strokes") && !this.capabilities.spatial;
         if (!spatialMigrated && tables.has("strokes") && this.capabilities.spatial) {
+          await this.connection.query(
+            "ALTER TABLE strokes ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';"
+          );
           const rows = await this.connection.query(
             "SELECT id, ST_AsGeoJSON(geom) AS geometry, color, width, geom_type, created_at FROM strokes ORDER BY created_at ASC;"
           );

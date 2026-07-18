@@ -539,6 +539,46 @@ describe("schema metadata", () => {
 });
 
 describe("legacy migration row isolation", () => {
+  it("legacy geom_typeをJSON・Spatial SELECTより先に補完する", async () => {
+    const metadata = new Map<string, string>([["schema_version", String(CURRENT_SCHEMA_VERSION)]]);
+    const sqlCalls: string[] = [];
+    const connection = {
+      query: vi.fn(async (sql: string) => {
+        sqlCalls.push(sql);
+        return result();
+      }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.includes("information_schema.tables")) {
+            return result([{ table_name: "strokes_json" }, { table_name: "strokes" }]);
+          }
+          if (sql.startsWith("INSERT INTO app_metadata")) metadata.set(String(args[0]), String(args[1]));
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await new GeometryRepository(connection, { opfs: false, spatial: true, store: "json" }).initialize();
+
+    const jsonAlter = sqlCalls.indexOf(
+      "ALTER TABLE strokes_json ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';"
+    );
+    const jsonSelect = sqlCalls.findIndex((sql) => sql.includes("FROM strokes_json"));
+    const spatialAlter = sqlCalls.indexOf(
+      "ALTER TABLE strokes ADD COLUMN IF NOT EXISTS geom_type VARCHAR DEFAULT 'line';"
+    );
+    const spatialSelect = sqlCalls.findIndex((sql) => sql.includes("FROM strokes ORDER BY"));
+    expect(jsonAlter).toBeGreaterThanOrEqual(0);
+    expect(jsonAlter).toBeLessThan(jsonSelect);
+    expect(spatialAlter).toBeGreaterThanOrEqual(0);
+    expect(spatialAlter).toBeLessThan(spatialSelect);
+  });
+
   it("valid/invalid JSON・Spatial rows混在でもvalid rowsをcommitしmarkerとskip warningを返す", async () => {
     const metadata = new Map<string, string>([["schema_version", String(CURRENT_SCHEMA_VERSION)]]);
     const insertedIds: string[] = [];
@@ -729,6 +769,11 @@ describe("legacy migration row isolation", () => {
 
     expect(insertedIds).toEqual(["json-only"]);
     expect(query.mock.calls.every(([sql]) => !String(sql).includes("ST_AsGeoJSON"))).toBe(true);
+    expect(
+      query.mock.calls.every(
+        ([sql]) => !String(sql).startsWith("ALTER TABLE strokes ADD COLUMN IF NOT EXISTS geom_type")
+      )
+    ).toBe(true);
     expect(metadata.get("legacy_strokes_migrated")).toBeUndefined();
     expect(query).toHaveBeenCalledWith("COMMIT;");
   });
