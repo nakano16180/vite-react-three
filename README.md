@@ -11,14 +11,16 @@ The app lets you draw lines and polygons on a 2D Three.js canvas, persist them i
 - Measure mode: displays line length or polygon area/perimeter.
 - Edit mode: move saved stroke points.
 - Pan mode: pan and zoom the orthographic canvas.
-- A canonical `GeometryFeature` model keeps geometry, arbitrary JSON properties, style, layer membership, and
-  creation time independent of the active database table.
+- A canonical `GeometryFeature` model keeps pixel-coordinate geometry, user properties, style, layer membership,
+  and creation time independent of the active database table.
+- Canonical geometry is either a `LineString` or a hole-free `Polygon`; polygon rings are stored open internally
+  and closed only at serialization boundaries.
 - New and legacy features belong to the built-in visible `Default` layer unless valid layer metadata specifies
   another layer.
 - DuckDB WASM persistence uses OPFS when available and an in-memory database otherwise.
 - DuckDB Spatial storage is used when available, with a JSON-table feature store as the non-Spatial fallback.
-- GeoJSON import and export preserve feature properties and workbench metadata for style, layer, creation time, and
-  referenced layers.
+- Canonical GeoJSON import and export preserve user properties and workbench metadata for style, layer, creation
+  time, and referenced layers.
 
 ## Requirements
 
@@ -70,7 +72,8 @@ npm run preview
 
 - `src/App.tsx`: application layout and mode wiring.
 - `src/domain/geometryFeature.ts`: canonical feature, geometry, style, and layer model.
-- `src/domain/renderableStroke.ts`: conversion from canonical features to rendering and measurement data.
+- `src/domain/renderableStroke.ts`: conversion from canonical features to rendering and measurement data, including
+  optional geometry simplification.
 - `src/db/createDuckDB.ts`: DuckDB startup, capability detection, and active-store selection.
 - `src/db/geometryRepository.ts`: store-independent feature and layer persistence, migration, and transactions.
 - `src/hooks/useGeometryFeatures.ts`: React feature state and serialized repository operations.
@@ -78,7 +81,7 @@ npm run preview
 - `src/components/DrawingSurface.tsx`: canvas drawing interactions.
 - `src/components/Scene.tsx`: feature, measurement, and polygon rendering.
 - `src/components/StrokeEditor.tsx`: point editing.
-- `src/lib/geometry.ts`: geometry calculations and simplification primitives.
+- `src/lib/geometry.ts`: length, area, perimeter, centroid, and polygon-closing measurement helpers.
 - `src/lib/geojson.ts`: canonical GeoJSON import and export.
 - `src/dbBundles.ts`: manually bundled DuckDB WASM assets.
 
@@ -104,9 +107,14 @@ instead of switching to JSON fallback.
 The repository creates the `Default` layer and transactionally migrates legacy `strokes_json` and `strokes` rows
 into canonical features once. Legacy colors and widths become canonical style, migrated features are assigned to
 the `Default` layer, and a Spatial row takes precedence when both legacy tables contain the same ID. Migration
-failures are surfaced as warnings and can be retried; successful OPFS writes are checkpointed for durability.
+failures before commit are rolled back, surfaced as warnings, and retried on a later initialization. After a
+successful commit, the migration marker remains set; a subsequent OPFS checkpoint failure is reported as a
+durability warning without rerunning the migration.
 
-GeoJSON exports standard `LineString` or `Polygon` geometry and leaves application properties in `properties`.
+GeoJSON exports standard `LineString` or single-ring, hole-free `Polygon` geometry and preserves canonical user
+properties in `properties`. During legacy import, the transport fields `id`, `color`, `width`, and `geomType` are
+removed from `properties`; `color` and `width` are converted to canonical style when explicit workbench style is
+absent. Polygons with holes or multiple rings are unsupported and skipped with an import warning.
 Workbench-specific `style`, `layerId`, and `createdAt` values are stored in each feature's `workbench` member, while
 referenced layer definitions are stored in the collection-level `workbench.layers`. Import accepts this metadata,
 falls back to the `Default` layer and default/legacy style when needed, and skips unsupported features with warnings.

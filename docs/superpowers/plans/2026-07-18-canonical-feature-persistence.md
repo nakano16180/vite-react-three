@@ -86,23 +86,58 @@ import {
 
 describe("geometry helpers", () => {
   it("polyline lengthを計算する", () => {
-    expect(getPolylineLength([[0, 0], [3, 4], [6, 8]])).toBe(10);
+    expect(
+      getPolylineLength([
+        [0, 0],
+        [3, 4],
+        [6, 8],
+      ])
+    ).toBe(10);
   });
 
   it("polygon areaとperimeterを計算する", () => {
-    const points: [number, number][] = [[0, 0], [4, 0], [4, 3]];
+    const points: [number, number][] = [
+      [0, 0],
+      [4, 0],
+      [4, 3],
+    ];
     expect(getPolygonArea(points)).toBe(6);
     expect(getPolygonPerimeter(points)).toBe(12);
   });
 
   it("点群のcentroidを計算する", () => {
-    expect(getCentroid([[0, 0], [6, 0], [0, 6]])).toEqual([2, 2]);
+    expect(
+      getCentroid([
+        [0, 0],
+        [6, 0],
+        [0, 6],
+      ])
+    ).toEqual([2, 2]);
     expect(getCentroid([])).toEqual([0, 0]);
   });
 
   it("4点以上で始点近傍に戻った場合だけpolygon候補にする", () => {
-    expect(isPolygonCloseCandidate([[0, 0], [20, 0], [20, 20], [2, 2]], 5)).toBe(true);
-    expect(isPolygonCloseCandidate([[0, 0], [20, 0], [2, 2]], 5)).toBe(false);
+    expect(
+      isPolygonCloseCandidate(
+        [
+          [0, 0],
+          [20, 0],
+          [20, 20],
+          [2, 2],
+        ],
+        5
+      )
+    ).toBe(true);
+    expect(
+      isPolygonCloseCandidate(
+        [
+          [0, 0],
+          [20, 0],
+          [2, 2],
+        ],
+        5
+      )
+    ).toBe(false);
   });
 });
 ```
@@ -145,18 +180,19 @@ Create `src/domain/geometryFeature.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_LAYER_ID,
-  createDefaultStyle,
-  createGeometryFeature,
-  isFeatureGeometry,
-} from "./geometryFeature";
+import { DEFAULT_LAYER_ID, createDefaultStyle, createGeometryFeature, isFeatureGeometry } from "./geometryFeature";
 
 describe("canonical feature model", () => {
   it("default layerとstyleを設定してfeatureを作る", () => {
     const feature = createGeometryFeature({
       id: "line-1",
-      geometry: { type: "LineString", coordinates: [[0, 0], [10, 10]] },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [10, 10],
+        ],
+      },
       createdAt: "2026-07-18T00:00:00.000Z",
     });
     expect(feature).toMatchObject({
@@ -169,15 +205,43 @@ describe("canonical feature model", () => {
 
   it("Polygonの重複終点をcanonical formから除く", () => {
     const feature = createGeometryFeature({
-      geometry: { type: "Polygon", coordinates: [[0, 0], [10, 0], [0, 10], [0, 0]] },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [0, 0],
+          [10, 0],
+          [0, 10],
+          [0, 0],
+        ],
+      },
     });
-    expect(feature.geometry.coordinates).toEqual([[0, 0], [10, 0], [0, 10]]);
+    expect(feature.geometry.coordinates).toEqual([
+      [0, 0],
+      [10, 0],
+      [0, 10],
+    ]);
   });
 
   it("有限値でない座標と点不足を拒否する", () => {
     expect(isFeatureGeometry({ type: "LineString", coordinates: [[0, 0]] })).toBe(false);
-    expect(isFeatureGeometry({ type: "Polygon", coordinates: [[0, 0], [1, 1]] })).toBe(false);
-    expect(isFeatureGeometry({ type: "LineString", coordinates: [[0, Number.NaN], [1, 1]] })).toBe(false);
+    expect(
+      isFeatureGeometry({
+        type: "Polygon",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      })
+    ).toBe(false);
+    expect(
+      isFeatureGeometry({
+        type: "LineString",
+        coordinates: [
+          [0, Number.NaN],
+          [1, 1],
+        ],
+      })
+    ).toBe(false);
   });
 });
 ```
@@ -340,7 +404,13 @@ describe("GeoJSON codec", () => {
   it("canonical fieldをLineStringでround-tripする", () => {
     const feature = createGeometryFeature({
       id: "line-1",
-      geometry: { type: "LineString", coordinates: [[1, 2], [3, 4]] },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [1, 2],
+          [3, 4],
+        ],
+      },
       properties: { name: "road", nested: { rank: 2 } },
       style: { strokeColor: "#ff0000", strokeWidth: 7 },
       createdAt: "2026-07-18T00:00:00.000Z",
@@ -354,17 +424,41 @@ describe("GeoJSON codec", () => {
   it("Polygon ringをexport時に閉じ、import時に開く", () => {
     const feature = createGeometryFeature({
       id: "polygon-1",
-      geometry: { type: "Polygon", coordinates: [[0, 0], [10, 0], [0, 10]] },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [0, 0],
+          [10, 0],
+          [0, 10],
+        ],
+      },
     });
     const exported = exportFeatureCollection([feature], [DEFAULT_LAYER]);
-    expect(exported.features[0].geometry.coordinates).toEqual([[[0, 0], [10, 0], [0, 10], [0, 0]]]);
-    expect(importFeatureCollection(exported).features[0].geometry.coordinates).toEqual([[0, 0], [10, 0], [0, 10]]);
+    expect(exported.features[0].geometry.coordinates).toEqual([
+      [
+        [0, 0],
+        [10, 0],
+        [0, 10],
+        [0, 0],
+      ],
+    ]);
+    expect(importFeatureCollection(exported).features[0].geometry.coordinates).toEqual([
+      [0, 0],
+      [10, 0],
+      [0, 10],
+    ]);
   });
 
   it("legacy propertiesをstyleへ変換しreserved fieldを除く", () => {
     const imported = importFeatureCollection({
       type: "Feature",
-      geometry: { type: "LineString", coordinates: [[0, 0], [1, 1]] },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      },
       properties: { id: "legacy-1", color: "#00ff00", width: 3, geomType: "line", label: "kept" },
     });
     expect(imported.features[0]).toMatchObject({
@@ -398,9 +492,7 @@ export interface GeoJSONFeatureCollection {
   features: Array<{
     type: "Feature";
     id: string;
-    geometry:
-      | { type: "LineString"; coordinates: Point2D[] }
-      | { type: "Polygon"; coordinates: Point2D[][] };
+    geometry: { type: "LineString"; coordinates: Point2D[] } | { type: "Polygon"; coordinates: Point2D[][] };
     properties: Record<string, JsonValue>;
     workbench: { style: FeatureStyle; layerId: string; createdAt: string };
   }>;
@@ -665,11 +757,20 @@ import { createGeometryFeature } from "./geometryFeature";
 import { toRenderableStroke } from "./renderableStroke";
 
 it("canonical Polygonを計測値つきRenderableStrokeへ変換する", () => {
-  const stroke = toRenderableStroke(createGeometryFeature({
-    id: "polygon-1",
-    geometry: { type: "Polygon", coordinates: [[0, 0], [4, 0], [4, 3]] },
-    style: { strokeColor: "#ff0000", strokeWidth: 2 },
-  }));
+  const stroke = toRenderableStroke(
+    createGeometryFeature({
+      id: "polygon-1",
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [0, 0],
+          [4, 0],
+          [4, 3],
+        ],
+      },
+      style: { strokeColor: "#ff0000", strokeWidth: 2 },
+    })
+  );
   expect(stroke).toMatchObject({
     id: "polygon-1",
     color: "#ff0000",
@@ -808,7 +909,10 @@ Create `tests/fixtures/features.geojson`:
       "id": "fixture-line",
       "geometry": {
         "type": "LineString",
-        "coordinates": [[100, 100], [240, 180]]
+        "coordinates": [
+          [100, 100],
+          [240, 180]
+        ]
       },
       "properties": {
         "name": "Fixture road",
