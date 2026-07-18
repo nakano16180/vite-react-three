@@ -15,7 +15,7 @@ import type { DuckDBCapabilities } from "./createDuckDB";
 
 type Row = Record<string, unknown>;
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export class PersistenceCheckpointError extends Error {
   constructor(cause: unknown) {
@@ -150,7 +150,7 @@ export class GeometryRepository {
         value TEXT NOT NULL
       );
     `);
-    await this.initializeSchemaVersion();
+    const previousSchemaVersion = await this.initializeSchemaVersion();
     await this.connection.query(`
       CREATE TABLE IF NOT EXISTS layers (
         id TEXT PRIMARY KEY,
@@ -168,7 +168,8 @@ export class GeometryRepository {
           properties JSON NOT NULL,
           style JSON NOT NULL,
           layer_id TEXT NOT NULL,
-          created_at TIMESTAMP NOT NULL
+          created_at TIMESTAMP NOT NULL,
+          inserted_at TIMESTAMP NOT NULL DEFAULT now()
         );
       `);
     } else {
@@ -180,9 +181,15 @@ export class GeometryRepository {
           properties JSON NOT NULL,
           style JSON NOT NULL,
           layer_id TEXT NOT NULL,
-          created_at TIMESTAMP NOT NULL
+          created_at TIMESTAMP NOT NULL,
+          inserted_at TIMESTAMP NOT NULL DEFAULT now()
         );
       `);
+    }
+    if (previousSchemaVersion === 1) {
+      const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+      await this.connection.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMP DEFAULT now();`);
+      await this.setMetadata("schema_version", String(CURRENT_SCHEMA_VERSION));
     }
     await this.initializeActiveStore();
     await this.insertLayers([DEFAULT_LAYER], true);
@@ -191,6 +198,7 @@ export class GeometryRepository {
     let committed = false;
     let skippedRows = 0;
     let replacedCreatedAtValues = 0;
+    const diagnostics: string[] = [];
     try {
       const migrated = await this.metadataValue("legacy_strokes_migrated");
       if (migrated !== "true") {
@@ -212,7 +220,8 @@ export class GeometryRepository {
             }
           }
         }
-        if (tables.has("strokes")) {
+        const spatialMigrationPending = tables.has("strokes") && !this.capabilities.spatial;
+        if (tables.has("strokes") && this.capabilities.spatial) {
           const rows = await this.connection.query(
             "SELECT id, ST_AsGeoJSON(geom) AS geometry, color, width, geom_type, created_at FROM strokes ORDER BY created_at ASC;"
           );
@@ -237,12 +246,16 @@ export class GeometryRepository {
         for (const feature of mergeLegacyFeatures(jsonFeatures, spatialFeatures)) {
           await this.insertFeature(feature, true, true);
         }
-        await this.setMetadata("legacy_strokes_migrated", "true");
+        if (!spatialMigrationPending) {
+          await this.setMetadata("legacy_strokes_migrated", "true");
+        }
+        if (spatialMigrationPending) {
+          diagnostics.push("Legacy Spatial stroke migration is pending until the Spatial extension is available.");
+        }
       }
       await this.connection.query("COMMIT;");
       committed = true;
       await this.checkpoint();
-      const diagnostics: string[] = [];
       if (skippedRows) {
         diagnostics.push(
           `Legacy stroke migration skipped ${skippedRows} invalid ${skippedRows === 1 ? "row" : "rows"}.`
@@ -350,7 +363,7 @@ export class GeometryRepository {
   async deleteLatestFeature(): Promise<void> {
     const table = this.capabilities.store === "spatial" ? "features" : "features_json";
     await this.connection.query(
-      `DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} ORDER BY created_at DESC, id DESC LIMIT 1);`
+      `DELETE FROM ${table} WHERE id IN (SELECT id FROM ${table} ORDER BY inserted_at DESC, id DESC LIMIT 1);`
     );
     await this.checkpoint();
   }
@@ -417,11 +430,11 @@ export class GeometryRepository {
     }
   }
 
-  private async initializeSchemaVersion(): Promise<void> {
+  private async initializeSchemaVersion(): Promise<number> {
     const stored = await this.metadataValue("schema_version");
     if (stored === undefined) {
       await this.setMetadata("schema_version", String(CURRENT_SCHEMA_VERSION));
-      return;
+      return CURRENT_SCHEMA_VERSION;
     }
     const version = Number(stored);
     if (!Number.isInteger(version) || version < 0) {
@@ -434,9 +447,11 @@ export class GeometryRepository {
     }
     if (version === 0) {
       await this.setMetadata("schema_version", String(CURRENT_SCHEMA_VERSION));
-      return;
+      return CURRENT_SCHEMA_VERSION;
     }
+    if (version === 1) return version;
     if (version !== CURRENT_SCHEMA_VERSION) throw new Error(`Unsupported schema version: ${version}`);
+    return version;
   }
 
   private async initializeActiveStore(): Promise<void> {

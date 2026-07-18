@@ -70,6 +70,29 @@ describe("GeoJSON codec", () => {
     });
   });
 
+  it("canonical workbench metadataがある場合はlegacy field名のpropertiesも保持する", () => {
+    const feature = createGeometryFeature({
+      id: "canonical-reserved-properties",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [0, 0],
+          [1, 1],
+        ],
+      },
+      properties: {
+        id: "user-id",
+        color: "classification-red",
+        width: 120,
+        geomType: "survey-line",
+      },
+    });
+
+    const imported = importFeatureCollection(exportFeatureCollection([feature], [DEFAULT_LAYER]));
+
+    expect(imported.features[0].properties).toEqual(feature.properties);
+  });
+
   it("不正なFeatureCollectionと非対応geometryをwarning付きでskipする", () => {
     expect(importFeatureCollection({ type: "FeatureCollection", features: "invalid" })).toMatchObject({
       features: [],

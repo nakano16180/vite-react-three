@@ -130,6 +130,7 @@ export default function App() {
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [simplifyOn, setSimplifyOn] = useState(true);
   const {
+    canExport,
     handleClear,
     handleExportGeoJSON,
     handleImportGeoJSON,
@@ -167,6 +168,7 @@ export default function App() {
         handleRefresh={handleRefresh}
         handleClear={handleClear}
         handleExportGeoJSON={handleExportGeoJSON}
+        exportDisabled={!canExport}
         handleImportGeoJSON={handleImportGeoJSON}
       />
 

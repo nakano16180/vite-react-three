@@ -109,7 +109,13 @@ into canonical features once. Legacy colors and widths become canonical style, m
 the `Default` layer, and a Spatial row takes precedence when both legacy tables contain the same ID. Migration
 failures before commit are rolled back, surfaced as warnings, and retried on a later initialization. After a
 successful commit, the migration marker remains set; a subsequent OPFS checkpoint failure is reported as a
-durability warning without rerunning the migration.
+durability warning without rerunning the migration. If Spatial is unavailable while a legacy `strokes` table exists,
+JSON legacy rows are committed immediately and Spatial migration remains pending until the extension becomes
+available.
+
+Canonical `createdAt` records when a feature was originally created and survives GeoJSON round-trips. A separate
+database insertion timestamp determines Undo order, so importing an older feature does not cause Undo to delete a
+newer pre-existing drawing.
 
 GeoJSON exports standard `LineString` or single-ring, hole-free `Polygon` geometry and preserves canonical user
 properties in `properties`. During legacy import, the transport fields `id`, `color`, `width`, and `geomType` are

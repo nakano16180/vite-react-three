@@ -197,6 +197,13 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
   );
 
   const handleExportGeoJSON = useCallback(async () => {
+    if (loading || !repositoryRef.current) {
+      setStorageStatus((current) => ({
+        ...current,
+        error: "GeoJSON export is unavailable until storage has loaded.",
+      }));
+      return;
+    }
     let url: string | undefined;
     let anchor: HTMLAnchorElement | undefined;
     setOperationNotice(undefined);
@@ -218,15 +225,17 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       anchor?.remove();
       if (url) URL.revokeObjectURL(url);
     }
-  }, [features, layers]);
+  }, [features, layers, loading]);
 
   const strokes = useMemo(() => features.map(toRenderableStroke), [features]);
+  const canExport = !loading && repositoryRef.current !== null;
 
   return {
     features,
     layers,
     loading,
     operationNotice,
+    canExport,
     storageStatus,
     strokes,
     persistStroke,

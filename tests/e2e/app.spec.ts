@@ -19,6 +19,15 @@ const getCanvasBox = async (page: Page) => {
 };
 
 test.describe("drawing workspace", () => {
+  test("DuckDB初期化中はGeoJSON exportを無効にする", async ({ page }) => {
+    await page.goto("./", { waitUntil: "domcontentloaded" });
+
+    const exportButton = page.getByRole("button", { name: "Export GeoJSON" });
+    await expect(exportButton).toBeDisabled();
+    await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    await expect(exportButton).toBeEnabled();
+  });
+
   test("renders the app shell and drawing canvas", async ({ page }) => {
     await gotoApp(page);
     await page.getByRole("button", { name: "Clear" }).click();

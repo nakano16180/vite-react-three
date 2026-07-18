@@ -108,11 +108,11 @@ const canonicalGeometry = (value: unknown): FeatureGeometry | null => {
   return isFeatureGeometry(normalized) ? normalized : null;
 };
 
-const readProperties = (value: unknown): Record<string, JsonValue> => {
+const readProperties = (value: unknown, stripLegacyTransportFields: boolean): Record<string, JsonValue> => {
   if (!isRecord(value)) return {};
   const properties: Record<string, JsonValue> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (!["id", "color", "width", "geomType"].includes(key) && isJsonValue(entry)) {
+    if ((!stripLegacyTransportFields || !["id", "color", "width", "geomType"].includes(key)) && isJsonValue(entry)) {
       Object.defineProperty(properties, key, {
         value: entry,
         enumerable: true,
@@ -178,7 +178,8 @@ export const importFeatureCollection = (
     }
 
     const legacy = isRecord(rawFeature.properties) ? rawFeature.properties : {};
-    const metadata = isRecord(rawFeature.workbench) ? rawFeature.workbench : {};
+    const canonicalMetadata = isRecord(rawFeature.workbench) ? rawFeature.workbench : undefined;
+    const metadata = canonicalMetadata ?? {};
     const style = isStyle(metadata.style)
       ? { ...metadata.style }
       : {
@@ -200,7 +201,7 @@ export const importFeatureCollection = (
       createGeometryFeature({
         id: uniqueId(rawFeature.id ?? legacy.id, usedIds),
         geometry,
-        properties: readProperties(rawFeature.properties),
+        properties: readProperties(rawFeature.properties, canonicalMetadata === undefined),
         style,
         layerId: requestedLayerId,
         createdAt,
