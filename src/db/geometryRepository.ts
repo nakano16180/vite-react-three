@@ -57,6 +57,13 @@ const geometryFromParts = (type: unknown, coordinates: unknown): FeatureGeometry
 
 const geometryFromGeoJson = (value: unknown): FeatureGeometry => {
   const parsed = jsonValue<{ type: string; coordinates: Point2D[] | Point2D[][] }>(value);
+  if (parsed.type === "Polygon") {
+    if (!Array.isArray(parsed.coordinates)) throw new Error("Invalid Polygon coordinates");
+    if (parsed.coordinates.length > 1) throw new Error("Polygon holes are not supported");
+    if (parsed.coordinates.length !== 1 || !Array.isArray(parsed.coordinates[0])) {
+      throw new Error("Invalid Polygon coordinates");
+    }
+  }
   const coordinates =
     parsed.type === "Polygon" ? (parsed.coordinates[0] as Point2D[]) : (parsed.coordinates as Point2D[]);
   const openCoordinates =
@@ -96,7 +103,7 @@ export const mergeLegacyFeatures = (
   return [...features.values()];
 };
 
-const mapSpatialFeatureRow = (row: Row): GeometryFeature => ({
+export const mapSpatialFeatureRow = (row: Row): GeometryFeature => ({
   id: stringValue(row.id),
   geometry: geometryFromGeoJson(row.geometry),
   properties: jsonValue<Record<string, JsonValue>>(row.properties),

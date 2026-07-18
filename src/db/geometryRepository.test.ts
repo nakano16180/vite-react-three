@@ -1,7 +1,7 @@
 import type { AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_LAYER_ID, type FeatureGeometry } from "../domain/geometryFeature";
-import { mergeLegacyFeatures, mapJsonFeatureRow, mapLegacyJsonRow } from "./geometryRepository";
+import { mapSpatialFeatureRow, mergeLegacyFeatures, mapJsonFeatureRow, mapLegacyJsonRow } from "./geometryRepository";
 import { GeometryRepository } from "./geometryRepository";
 
 describe("geometry repository row mapping", () => {
@@ -48,6 +48,35 @@ describe("geometry repository row mapping", () => {
       })
     ).toThrow("Unsupported geometry type");
   });
+
+  it("hole付きSpatial Polygonを外周だけへ縮退させずrejectする", () => {
+    expect(() =>
+      mapSpatialFeatureRow({
+        id: "polygon-with-hole",
+        geometry: JSON.stringify({
+          type: "Polygon",
+          coordinates: [
+            [
+              [0, 0],
+              [4, 0],
+              [4, 4],
+              [0, 0],
+            ],
+            [
+              [1, 1],
+              [2, 1],
+              [1, 2],
+              [1, 1],
+            ],
+          ],
+        }),
+        properties: "{}",
+        style: '{"strokeColor":"#123456","strokeWidth":5}',
+        layer_id: DEFAULT_LAYER_ID,
+        created_at: "2026-07-18T00:00:00.000Z",
+      })
+    ).toThrow("Polygon holes are not supported");
+  });
 });
 
 describe("geometry repository store parity", () => {
@@ -80,6 +109,35 @@ describe("geometry repository store parity", () => {
       expect(query).toHaveBeenCalledWith("LINESTRING(0 0, 1 0.25, 2 0)", "feature-1");
     } else {
       expect(query).toHaveBeenCalledWith("LineString", JSON.stringify(geometry.coordinates), "feature-1");
+    }
+  });
+
+  it.each(["spatial", "json"] as const)("%s updateは同じcanonical Polygon頂点を保持する", async (store) => {
+    const polygon: FeatureGeometry = {
+      type: "Polygon",
+      coordinates: [
+        [0, 0],
+        [3, 0],
+        [3, 2],
+      ],
+    };
+    const query = vi.fn().mockResolvedValue({ toArray: () => [] });
+    const prepare = vi.fn().mockResolvedValue({
+      query,
+      close: vi.fn().mockResolvedValue(undefined),
+    });
+    const repository = new GeometryRepository({ prepare } as unknown as AsyncDuckDBConnection, {
+      opfs: false,
+      spatial: store === "spatial",
+      store,
+    });
+
+    await repository.updateGeometry("polygon-1", polygon);
+
+    if (store === "spatial") {
+      expect(query).toHaveBeenCalledWith("POLYGON((0 0, 3 0, 3 2, 0 0))", "polygon-1");
+    } else {
+      expect(query).toHaveBeenCalledWith("Polygon", JSON.stringify(polygon.coordinates), "polygon-1");
     }
   });
 
