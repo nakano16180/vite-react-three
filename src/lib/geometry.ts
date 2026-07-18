@@ -1,4 +1,5 @@
-export type Point2D = [number, number];
+export type { Point2D } from "../domain/geometryFeature";
+import type { Point2D } from "../domain/geometryFeature";
 
 export const pointsEqual = ([ax, ay]: Point2D, [bx, by]: Point2D) => ax === bx && ay === by;
 
