@@ -10,7 +10,8 @@ import {
   type Point2D,
 } from "../domain/geometryFeature";
 import { simplifyFeatureGeometry, toRenderableStroke } from "../domain/renderableStroke";
-import { exportFeatureCollection, importFeatureCollection } from "../lib/geojson";
+import { exportFeatureCollection } from "../lib/geojson";
+import { importGeometryFeatures } from "../lib/importGeometryFeatures";
 import { createPromiseQueue } from "../lib/promiseQueue";
 
 export type GeometryType = "line" | "polygon";
@@ -170,26 +171,24 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) return;
-      const generation = generationRef.current;
-      setOperationNotice(undefined);
-      try {
-        const contents = await file.text();
-        if (generationRef.current !== generation || !repositoryRef.current) return;
-        const imported = importFeatureCollection(JSON.parse(contents), new Set(features.map(({ id }) => id)));
-        await runRepositoryAction(
-          (repository) => repository.importGeoJSON(imported.layers, imported.features),
-          imported.warnings.length > 0
-            ? () => setOperationNotice(`GeoJSON import: ${imported.warnings.length}件をスキップしました。`)
-            : undefined
-        );
-      } catch (error) {
-        if (generationRef.current === generation && repositoryRef.current) {
-          setOperationNotice(undefined);
-          setStorageStatus((current) => ({ ...current, error: `GeoJSON import failed: ${errorMessage(error)}` }));
+      let warnings: string[] = [];
+      await runRepositoryAction(
+        async (repository) => {
+          try {
+            const imported = await importGeometryFeatures(repository, () => file.text());
+            warnings = imported.warnings;
+          } catch (error) {
+            throw new Error(`GeoJSON import failed: ${errorMessage(error)}`);
+          }
+        },
+        () => {
+          if (warnings.length > 0) {
+            setOperationNotice(`GeoJSON import: ${warnings.length}件をスキップしました。`);
+          }
         }
-      }
+      );
     },
-    [features, runRepositoryAction]
+    [runRepositoryAction]
   );
 
   const handleExportGeoJSON = useCallback(async () => {
