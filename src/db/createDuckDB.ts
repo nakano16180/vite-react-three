@@ -22,6 +22,8 @@ export class StoredFeatureStoreUnavailableError extends Error {
   }
 }
 
+type BootstrapDatabase = Pick<duckdb.AsyncDuckDB, "instantiate" | "open" | "connect" | "terminate">;
+
 const readActiveStore = async (connection: duckdb.AsyncDuckDBConnection): Promise<FeatureStore | undefined> => {
   const statement = await connection.prepare("SELECT value FROM app_metadata WHERE key = ?;");
   try {
@@ -46,46 +48,65 @@ const writeActiveStore = async (connection: duckdb.AsyncDuckDBConnection, store:
   }
 };
 
+export const bootstrapDuckDB = async (
+  db: BootstrapDatabase,
+  selectedBundle: typeof bundle = bundle
+): Promise<DuckDBContext> => {
+  let connection: duckdb.AsyncDuckDBConnection | undefined;
+  let opfs = false;
+  try {
+    await db.instantiate(selectedBundle.mainModule, selectedBundle.pthreadWorker);
+    try {
+      await db.open({
+        path: "opfs://vite-react-three.duckdb",
+        accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
+      });
+      opfs = true;
+    } catch (error) {
+      console.warn("OPFS not available, using in-memory database:", error);
+    }
+
+    connection = await db.connect();
+    let spatial = false;
+    try {
+      await connection.query("INSTALL spatial;");
+      await connection.query("LOAD spatial;");
+      spatial = true;
+    } catch (error) {
+      console.warn("Spatial extension load failed:", error);
+    }
+
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS app_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+    const stored = await readActiveStore(connection);
+    if (stored === "spatial" && !spatial) throw new StoredFeatureStoreUnavailableError();
+    const store = stored ?? (spatial ? "spatial" : "json");
+    if (!stored) await writeActiveStore(connection, store);
+
+    return { db: db as duckdb.AsyncDuckDB, connection, capabilities: { opfs, spatial, store } };
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch {
+        // Preserve the bootstrap failure; cleanup is best-effort.
+      }
+    }
+    try {
+      await db.terminate();
+    } catch {
+      // Preserve the bootstrap failure; cleanup is best-effort.
+    }
+    throw error;
+  }
+};
+
 export const createDuckDB = async (): Promise<DuckDBContext> => {
   const worker = new Worker(bundle.mainWorker!, { type: "module" });
   const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
-  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-
-  let opfs = false;
-  try {
-    await db.open({
-      path: "opfs://vite-react-three.duckdb",
-      accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
-    });
-    opfs = true;
-  } catch (error) {
-    console.warn("OPFS not available, using in-memory database:", error);
-  }
-
-  const connection = await db.connect();
-  let spatial = false;
-  try {
-    await connection.query("INSTALL spatial;");
-    await connection.query("LOAD spatial;");
-    spatial = true;
-  } catch (error) {
-    console.warn("Spatial extension load failed:", error);
-  }
-
-  await connection.query(`
-    CREATE TABLE IF NOT EXISTS app_metadata (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-  const stored = await readActiveStore(connection);
-  if (stored === "spatial" && !spatial) {
-    await connection.close();
-    await db.terminate();
-    throw new StoredFeatureStoreUnavailableError();
-  }
-  const store = stored ?? (spatial ? "spatial" : "json");
-  if (!stored) await writeActiveStore(connection, store);
-
-  return { db, connection, capabilities: { opfs, spatial, store } };
+  return bootstrapDuckDB(db);
 };

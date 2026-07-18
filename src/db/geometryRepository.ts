@@ -43,8 +43,12 @@ const isoTimestamp = (value: unknown): string => {
 };
 
 const geometryFromParts = (type: unknown, coordinates: unknown): FeatureGeometry => {
+  const rawType = stringValue(type);
+  if (rawType !== "LineString" && rawType !== "line" && rawType !== "Polygon" && rawType !== "polygon") {
+    throw new Error(`Unsupported geometry type: ${rawType}`);
+  }
   const geometry = {
-    type: stringValue(type) === "Polygon" || stringValue(type) === "polygon" ? "Polygon" : "LineString",
+    type: rawType === "Polygon" || rawType === "polygon" ? "Polygon" : "LineString",
     coordinates: coordinates as Point2D[],
   } as FeatureGeometry;
   if (!isFeatureGeometry(geometry)) throw new Error("Invalid geometry row");
@@ -82,6 +86,15 @@ export const mapLegacyJsonRow = (row: LegacyJsonRow): GeometryFeature => ({
   layerId: DEFAULT_LAYER_ID,
   createdAt: isoTimestamp(row.created_at),
 });
+
+export const mergeLegacyFeatures = (
+  jsonFeatures: GeometryFeature[],
+  spatialFeatures: GeometryFeature[]
+): GeometryFeature[] => {
+  const features = new Map(jsonFeatures.map((feature) => [feature.id, feature]));
+  for (const feature of spatialFeatures) features.set(feature.id, feature);
+  return [...features.values()];
+};
 
 const mapSpatialFeatureRow = (row: Row): GeometryFeature => ({
   id: stringValue(row.id),
@@ -154,14 +167,14 @@ export class GeometryRepository {
       const migrated = await this.metadataValue("legacy_strokes_migrated");
       if (migrated !== "true") {
         const tables = await this.legacyTables();
-        const features = new Map<string, GeometryFeature>();
+        const jsonFeatures: GeometryFeature[] = [];
+        const spatialFeatures: GeometryFeature[] = [];
         if (tables.has("strokes_json")) {
           const rows = await this.connection.query(
             "SELECT id, coords, color, width, geom_type, created_at FROM strokes_json ORDER BY created_at ASC;"
           );
           for (const row of rows.toArray()) {
-            const feature = mapLegacyJsonRow(row.toJSON() as LegacyJsonRow);
-            features.set(feature.id, feature);
+            jsonFeatures.push(mapLegacyJsonRow(row.toJSON() as LegacyJsonRow));
           }
         }
         if (tables.has("strokes")) {
@@ -170,24 +183,29 @@ export class GeometryRepository {
           );
           for (const row of rows.toArray()) {
             const value = row.toJSON() as Row;
-            const feature: GeometryFeature = {
+            spatialFeatures.push({
               id: stringValue(value.id),
               geometry: geometryFromGeoJson(value.geometry),
               properties: {},
               style: createDefaultStyle(stringValue(value.color) || "#222222", Number(value.width) || 4),
               layerId: DEFAULT_LAYER_ID,
               createdAt: isoTimestamp(value.created_at),
-            };
-            features.set(feature.id, feature);
+            });
           }
         }
-        for (const feature of features.values()) await this.insertFeature(feature, true);
+        for (const feature of mergeLegacyFeatures(jsonFeatures, spatialFeatures)) {
+          await this.insertFeature(feature, true);
+        }
         await this.setMetadata("legacy_strokes_migrated", "true");
       }
       await this.connection.query("COMMIT;");
       return {};
     } catch (error) {
-      await this.connection.query("ROLLBACK;");
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the migration failure; rollback is best-effort.
+      }
       return {
         migrationWarning: `Legacy stroke migration failed: ${error instanceof Error ? error.message : String(error)}`,
       };
@@ -242,16 +260,13 @@ export class GeometryRepository {
     }
   }
 
-  async updateGeometry(id: string, geometry: FeatureGeometry, simplifyTolerance?: number): Promise<void> {
+  async updateGeometry(id: string, geometry: FeatureGeometry): Promise<void> {
     if (this.capabilities.store === "spatial") {
       const statement = await this.connection.prepare(
-        simplifyTolerance == null
-          ? "UPDATE features SET geom = ST_GeomFromText(CAST(? AS VARCHAR)) WHERE id = ?;"
-          : "UPDATE features SET geom = ST_Simplify(ST_GeomFromText(CAST(? AS VARCHAR)), ?) WHERE id = ?;"
+        "UPDATE features SET geom = ST_GeomFromText(CAST(? AS VARCHAR)) WHERE id = ?;"
       );
       try {
-        if (simplifyTolerance == null) await statement.query(geometryToWkt(geometry), id);
-        else await statement.query(geometryToWkt(geometry), simplifyTolerance, id);
+        await statement.query(geometryToWkt(geometry), id);
       } finally {
         await statement.close();
       }
