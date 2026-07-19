@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Preserve the panned viewport across reloads while keeping drawing and editing available over the visible canvas.
+**Goal:** Preserve Pan and zoom across reloads while keeping drawing available immediately after viewport restoration.
 
-**Architecture:** Keep persisted `Point2D` values in model space. Store camera position and OrbitControls target as browser-local viewport state, restore both together, and move only the transparent interaction planes with the camera.
+**Architecture:** Keep persisted `Point2D` values in model space. Store camera position, OrbitControls target, and orthographic zoom as browser-local viewport state; restore them together, and synchronize the transparent draw plane from the render loop rather than React render timing.
 
 **Tech Stack:** React 19, React Three Fiber, Three.js orthographic camera, Vitest, Playwright
 
@@ -16,6 +16,76 @@
 - Preserve draw, edit, measure, pan, refresh, reload, and GeoJSON behavior.
 
 ---
+
+### Task 0: Address viewport restoration review feedback
+
+**Files:**
+
+- Modify: `src/lib/viewportState.test.ts`
+- Modify: `src/lib/viewportState.ts`
+- Modify: `src/components/PanControls.tsx`
+- Modify: `src/components/DrawingSurface.tsx`
+- Modify: `tests/e2e/app.spec.ts`
+
+**Interfaces:**
+
+- Extends `ViewportState` with `zoom: number`.
+- Treats stored state without `zoom` as zoom `1`.
+- Keeps the draw plane position synchronized with camera x/y on every frame.
+
+- [ ] **Step 1: Write failing zoom state tests**
+
+Add tests for valid positive zoom, legacy state without zoom, zero zoom, negative
+zoom, non-finite zoom, and saving zoom.
+
+- [ ] **Step 2: Verify the zoom tests fail**
+
+Run:
+
+```sh
+npm test -- src/lib/viewportState.test.ts
+```
+
+Expected: FAIL because viewport state does not yet load or save zoom.
+
+- [ ] **Step 3: Extend viewport state and PanControls**
+
+Load legacy state with zoom `1`, reject explicitly invalid zoom, persist current
+camera zoom, and restore zoom before calling `camera.updateProjectionMatrix()`
+and `controls.update()`.
+
+- [ ] **Step 4: Write a failing restored-Draw E2E**
+
+After Pan and zoom, reload while Draw remains the default mode. Without changing
+mode, draw a uniquely measurable line in the visible region and assert it is
+persisted. Also verify the pre-existing measurement has the same bounding box
+before and after reload.
+
+- [ ] **Step 5: Verify the restored-Draw E2E fails**
+
+Run:
+
+```sh
+npx playwright test tests/e2e/app.spec.ts --grep "PanとZoom"
+```
+
+Expected: FAIL before the draw plane frame synchronization and zoom restoration.
+
+- [ ] **Step 6: Synchronize the draw plane**
+
+Use a mesh ref and `useFrame` to copy camera x/y into the plane position. Keep
+geometry, previews, and persisted model coordinates unchanged.
+
+- [ ] **Step 7: Verify focused tests**
+
+Run:
+
+```sh
+npm test -- src/lib/viewportState.test.ts
+npx playwright test tests/e2e/app.spec.ts --grep "PanとZoom"
+```
+
+Expected: PASS on desktop and mobile.
 
 ### Task 1: Reproduce viewport loss after reload
 

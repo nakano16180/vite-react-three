@@ -9,6 +9,7 @@ over the visible canvas after the orthographic camera has been panned.
 ## Scope
 
 - Persist and restore the orthographic camera position and controls target.
+- Persist and restore the orthographic camera zoom.
 - Keep drawing and editing interaction planes aligned with the visible viewport.
 - Add browser coverage for drawing and editing after Pan followed by reload.
 - Do not change the persistence schema or configure touch gestures.
@@ -19,15 +20,18 @@ Treat persisted pixel coordinates as model coordinates. R3F pointer
 intersections already produce world coordinates, so the existing pixel/world
 conversion must not subtract the camera position.
 
-Add a focused Pan controls component that restores camera position and controls
-target from browser-local viewport state, then writes both values whenever the
-controls change. Camera position and target move together, preserving the
-orthographic viewing direction. Invalid or missing saved state falls back to
-the current `[0, 0, 100]` camera and `[0, 0, 0]` target.
+Add a focused Pan controls component that restores camera position, controls
+target, and zoom from browser-local viewport state, then writes those values
+whenever the controls change. Camera position and target move together,
+preserving the orthographic viewing direction. Restoring zoom updates the
+camera projection matrix. Invalid or missing saved state falls back to the
+current `[0, 0, 100]` camera, `[0, 0, 0]` target, and zoom `1`. Saved state from
+the earlier format without zoom remains valid and receives zoom `1`.
 
-`DrawingSurface` and `StrokeEditor` will center their transparent interaction
-planes on the current camera x/y position. Geometry and edit handles remain in
-model space; only the event-capturing planes follow the visible viewport.
+`DrawingSurface` will update its transparent interaction plane from `useFrame`
+so camera restoration and control mutation do not depend on React rendering.
+Geometry and previews remain in model space; only the event-capturing plane
+follows the visible viewport.
 
 ## Verification
 
@@ -38,5 +42,6 @@ Use test-driven development:
 2. Confirm the regression fails before adding the implementation.
 3. Add viewport-state parsing tests and the smallest Pan controls integration.
 4. Add browser coverage that the visible interaction plane still accepts
-   drawing and editing after Pan.
-5. Run unit tests, the focused browser tests, lint, and build.
+   drawing immediately after viewport restoration without a mode change.
+5. Add browser coverage that Pan and zoom both survive reload.
+6. Run unit tests, the focused browser tests, lint, and build.
