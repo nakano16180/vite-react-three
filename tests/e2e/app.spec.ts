@@ -136,7 +136,8 @@ test.describe("drawing workspace", () => {
     await expect(page.getByText("Length: 215.4 px")).toBeVisible();
   });
 
-  test("Panはviewportを移動し新しいgeometryを作らない", async ({ page }) => {
+  test("Pan後の座標とviewportをreload後も保持する", async ({ page }) => {
+    test.setTimeout(90_000);
     await gotoApp(page);
     const box = await getCanvasBox(page);
     await page.getByRole("button", { name: "Clear" }).click();
@@ -164,7 +165,28 @@ test.describe("drawing workspace", () => {
     if (!afterPan) throw new Error("measurement bounding box was not available after pan");
     expect(Math.hypot(afterPan.x - beforePan.x, afterPan.y - beforePan.y)).toBeGreaterThan(20);
 
-    expect(await exportFeatureCount(page)).toBe(1);
+    const pannedStart = { x: box.x + 100, y: box.y + 100 };
+    const pannedEnd = { x: box.x + 260, y: box.y + 180 };
+    await page.getByRole("button", { name: "Draw" }).click();
+    await page.mouse.click(pannedStart.x, pannedStart.y);
+    await page.mouse.click(pannedEnd.x, pannedEnd.y);
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Measure" }).click();
+    const pannedMeasurement = page.getByText("Length: 178.9 px");
+    await expect(pannedMeasurement).toBeVisible();
+    const afterDraw = await pannedMeasurement.boundingBox();
+    if (!afterDraw) throw new Error("panned measurement bounding box was not available before reload");
+
+    expect(await exportFeatureCount(page)).toBe(2);
+
+    await page.reload();
+    await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Measure" }).click();
+    await expect(pannedMeasurement).toBeVisible();
+    const afterReload = await pannedMeasurement.boundingBox();
+    if (!afterReload) throw new Error("measurement bounding box was not available after reload");
+    expect(Math.hypot(afterReload.x - afterDraw.x, afterReload.y - afterDraw.y)).toBeLessThanOrEqual(2);
   });
 
   test("Clearしたgeometryはrefreshとreload後にも復元されない", async ({ page }) => {

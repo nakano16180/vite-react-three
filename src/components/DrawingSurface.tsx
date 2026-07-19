@@ -8,6 +8,7 @@ import {
   isPolygonCloseCandidate,
   type Point2D,
 } from "../lib/geometry";
+import { pointerToModelPixel } from "../lib/canvasCoordinates";
 
 interface DrawingSurfaceProps {
   onFinish: (ptsPx: Point2D[], type: "line" | "polygon") => void | Promise<void>;
@@ -17,7 +18,7 @@ interface DrawingSurfaceProps {
 }
 
 export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfaceProps) {
-  const { size, viewport } = useThree();
+  const { camera, size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
   const currentPtsPxRef = useRef<Point2D[]>([]);
@@ -28,6 +29,15 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
       const y = ((viewport.height / 2 - wy) / viewport.height) * size.height;
       return [x, y];
     },
+    [size.height, size.width, viewport.height, viewport.width]
+  );
+
+  const pxToWorld = useCallback(
+    (x: number, y: number): [number, number, number] => [
+      (x / size.width) * viewport.width - viewport.width / 2,
+      viewport.height / 2 - (y / size.height) * viewport.height,
+      0,
+    ],
     [size.height, size.width, viewport.height, viewport.width]
   );
 
@@ -66,19 +76,20 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
     setHoverWorld(null);
   }, [enabled]);
 
-  const onClick = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
+  const onClick = (e: { stopPropagation: () => void; pointer: { x: number; y: number } }) => {
     if (!enabled) return;
     e.stopPropagation();
-    const p = e.point;
-    const nextWorld: [number, number, number] = [p.x, p.y, 0];
-    currentPtsPxRef.current = [...currentPtsPxRef.current, worldToPx(p.x, p.y)];
+    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position);
+    const nextWorld = pxToWorld(pointPx[0], pointPx[1]);
+    currentPtsPxRef.current = [...currentPtsPxRef.current, pointPx];
     setCurrentPtsWorld((prev) => [...prev, nextWorld]);
     setHoverWorld(nextWorld);
   };
 
-  const onPointerMove = (e: { point: { x: number; y: number; z: number } }) => {
+  const onPointerMove = (e: { pointer: { x: number; y: number } }) => {
     if (!enabled) return;
-    setHoverWorld([e.point.x, e.point.y, 0]);
+    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position);
+    setHoverWorld(pxToWorld(pointPx[0], pointPx[1]));
   };
 
   const onDoubleClick = async (e: { stopPropagation: () => void }) => {
@@ -151,7 +162,12 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
           <meshBasicMaterial color={color} />
         </mesh>
       )}
-      <mesh position={[0, 0, -0.001]} onClick={onClick} onDoubleClick={onDoubleClick} onPointerMove={onPointerMove}>
+      <mesh
+        position={[camera.position.x, camera.position.y, -0.001]}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        onPointerMove={onPointerMove}
+      >
         <planeGeometry args={planeArgs} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
