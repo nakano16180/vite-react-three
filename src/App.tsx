@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import * as THREE from "three";
 import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
@@ -46,7 +47,12 @@ function Workspace({
           >
             <color attach="background" args={["#ffffff"]} />
             <ambientLight intensity={0.5} />
-            <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
+            <OrbitControls
+              makeDefault
+              enableRotate={false}
+              enabled={interactionMode === "pan"}
+              mouseButtons={{ LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }}
+            />
 
             <Scene
               strokes={strokes}
