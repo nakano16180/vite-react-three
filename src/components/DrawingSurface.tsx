@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useThree } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
+import type { Mesh } from "three";
 import {
   getPolygonArea,
   getPolygonPerimeter,
@@ -8,6 +9,7 @@ import {
   isPolygonCloseCandidate,
   type Point2D,
 } from "../lib/geometry";
+import { pointerToModelPixel } from "../lib/canvasCoordinates";
 
 interface DrawingSurfaceProps {
   onFinish: (ptsPx: Point2D[], type: "line" | "polygon") => void | Promise<void>;
@@ -17,10 +19,11 @@ interface DrawingSurfaceProps {
 }
 
 export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfaceProps) {
-  const { size, viewport } = useThree();
+  const { camera, size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
   const currentPtsPxRef = useRef<Point2D[]>([]);
+  const interactionPlaneRef = useRef<Mesh>(null);
 
   const worldToPx = useCallback(
     (wx: number, wy: number): Point2D => {
@@ -31,7 +34,20 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
     [size.height, size.width, viewport.height, viewport.width]
   );
 
+  const pxToWorld = useCallback(
+    (x: number, y: number): [number, number, number] => [
+      (x / size.width) * viewport.width - viewport.width / 2,
+      viewport.height / 2 - (y / size.height) * viewport.height,
+      0,
+    ],
+    [size.height, size.width, viewport.height, viewport.width]
+  );
+
   const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
+
+  useFrame(() => {
+    interactionPlaneRef.current?.position.set(camera.position.x, camera.position.y, -0.001);
+  });
 
   const finishStroke = useCallback(async () => {
     const ptsPx = currentPtsPxRef.current.filter(
@@ -66,19 +82,20 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
     setHoverWorld(null);
   }, [enabled]);
 
-  const onClick = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
+  const onClick = (e: { stopPropagation: () => void; pointer: { x: number; y: number } }) => {
     if (!enabled) return;
     e.stopPropagation();
-    const p = e.point;
-    const nextWorld: [number, number, number] = [p.x, p.y, 0];
-    currentPtsPxRef.current = [...currentPtsPxRef.current, worldToPx(p.x, p.y)];
+    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
+    const nextWorld = pxToWorld(pointPx[0], pointPx[1]);
+    currentPtsPxRef.current = [...currentPtsPxRef.current, pointPx];
     setCurrentPtsWorld((prev) => [...prev, nextWorld]);
     setHoverWorld(nextWorld);
   };
 
-  const onPointerMove = (e: { point: { x: number; y: number; z: number } }) => {
+  const onPointerMove = (e: { pointer: { x: number; y: number } }) => {
     if (!enabled) return;
-    setHoverWorld([e.point.x, e.point.y, 0]);
+    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
+    setHoverWorld(pxToWorld(pointPx[0], pointPx[1]));
   };
 
   const onDoubleClick = async (e: { stopPropagation: () => void }) => {
@@ -151,7 +168,13 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
           <meshBasicMaterial color={color} />
         </mesh>
       )}
-      <mesh position={[0, 0, -0.001]} onClick={onClick} onDoubleClick={onDoubleClick} onPointerMove={onPointerMove}>
+      <mesh
+        ref={interactionPlaneRef}
+        position={[camera.position.x, camera.position.y, -0.001]}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        onPointerMove={onPointerMove}
+      >
         <planeGeometry args={planeArgs} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>

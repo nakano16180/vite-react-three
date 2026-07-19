@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
 import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
 import { StrokeEditor } from "./components/StrokeEditor";
+import { PanControls } from "./components/PanControls";
 import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
@@ -46,7 +46,7 @@ function Workspace({
           >
             <color attach="background" args={["#ffffff"]} />
             <ambientLight intensity={0.5} />
-            <OrbitControls makeDefault enableRotate={false} enabled={interactionMode === "pan"} />
+            <PanControls enabled={interactionMode === "pan"} />
 
             <Scene
               strokes={strokes}
