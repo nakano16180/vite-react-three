@@ -20,6 +20,8 @@ export function PanControls({ enabled }: PanControlsProps) {
     if (!restored) return;
 
     camera.position.set(restored.cameraX, restored.cameraY, camera.position.z);
+    camera.zoom = restored.zoom;
+    camera.updateProjectionMatrix();
     controls.target.set(restored.targetX, restored.targetY, controls.target.z);
     controls.update();
   }, [camera]);
@@ -33,6 +35,7 @@ export function PanControls({ enabled }: PanControlsProps) {
       cameraY: camera.position.y,
       targetX: controls.target.x,
       targetY: controls.target.y,
+      zoom: camera.zoom,
     });
   };
 

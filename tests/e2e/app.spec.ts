@@ -136,7 +136,7 @@ test.describe("drawing workspace", () => {
     await expect(page.getByText("Length: 215.4 px")).toBeVisible();
   });
 
-  test("Pan後の座標とviewportをreload後も保持する", async ({ page }) => {
+  test("PanとZoom後のviewportをreload直後のDrawでも保持する", async ({ page }) => {
     test.setTimeout(90_000);
     await gotoApp(page);
     const box = await getCanvasBox(page);
@@ -156,8 +156,15 @@ test.describe("drawing workspace", () => {
     await expect(page.getByRole("button", { name: "Pan" })).toHaveAttribute("aria-pressed", "true");
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.6, { steps: 8 });
+    await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.75, { steps: 12 });
     await page.mouse.up();
+    await page.mouse.wheel(0, 500);
+    const zoomBeforeReload = await page.evaluate(() => {
+      const value = window.localStorage.getItem("vite-react-three:viewport");
+      return value ? (JSON.parse(value) as { zoom?: number }).zoom : undefined;
+    });
+    expect(zoomBeforeReload).toBeDefined();
+    expect(zoomBeforeReload).not.toBe(1);
 
     await page.getByRole("button", { name: "Measure" }).click();
     await expect(measurement).toBeVisible();
@@ -182,6 +189,17 @@ test.describe("drawing workspace", () => {
 
     await page.reload();
     await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    const zoomAfterReload = await page.evaluate(() => {
+      const value = window.localStorage.getItem("vite-react-three:viewport");
+      return value ? (JSON.parse(value) as { zoom?: number }).zoom : undefined;
+    });
+    expect(zoomAfterReload).toBeCloseTo(zoomBeforeReload ?? 1);
+
+    await page.mouse.click(box.x + 20, box.y + 300);
+    await page.mouse.click(box.x + 100, box.y + 300);
+    await page.keyboard.press("Escape");
+    expect(await exportFeatureCount(page)).toBe(3);
+
     await page.getByRole("button", { name: "Measure" }).click();
     await expect(pannedMeasurement).toBeVisible();
     const afterReload = await pannedMeasurement.boundingBox();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useThree } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
+import type { Mesh } from "three";
 import {
   getPolygonArea,
   getPolygonPerimeter,
@@ -22,6 +23,7 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
   const currentPtsPxRef = useRef<Point2D[]>([]);
+  const interactionPlaneRef = useRef<Mesh>(null);
 
   const worldToPx = useCallback(
     (wx: number, wy: number): Point2D => {
@@ -42,6 +44,10 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
   );
 
   const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
+
+  useFrame(() => {
+    interactionPlaneRef.current?.position.set(camera.position.x, camera.position.y, -0.001);
+  });
 
   const finishStroke = useCallback(async () => {
     const ptsPx = currentPtsPxRef.current.filter(
@@ -163,6 +169,7 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
         </mesh>
       )}
       <mesh
+        ref={interactionPlaneRef}
         position={[camera.position.x, camera.position.y, -0.001]}
         onClick={onClick}
         onDoubleClick={onDoubleClick}

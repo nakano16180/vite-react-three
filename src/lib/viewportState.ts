@@ -5,6 +5,7 @@ export interface ViewportState {
   cameraY: number;
   targetX: number;
   targetY: number;
+  zoom: number;
 }
 
 interface ReadableStorage {
@@ -32,11 +33,15 @@ export const loadViewportState = (storage: ReadableStorage): ViewportState | nul
       return null;
     }
 
+    const zoom = parsed.zoom === undefined ? 1 : parsed.zoom;
+    if (!isFiniteNumber(zoom) || zoom <= 0) return null;
+
     return {
       cameraX: parsed.cameraX,
       cameraY: parsed.cameraY,
       targetX: parsed.targetX,
       targetY: parsed.targetY,
+      zoom,
     };
   } catch {
     return null;
