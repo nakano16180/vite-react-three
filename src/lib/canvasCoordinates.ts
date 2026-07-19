@@ -14,12 +14,15 @@ export const pointerToModelPixel = (
   pointer: Vector2Like,
   size: Size2D,
   viewport: Size2D,
-  cameraPosition: Vector2Like
+  cameraPosition: Vector2Like,
+  zoom: number
 ): Point2D => {
-  const screenX = ((pointer.x + 1) / 2) * size.width;
-  const screenY = ((1 - pointer.y) / 2) * size.height;
+  const centerX = size.width / 2;
+  const centerY = size.height / 2;
+  const pointerOffsetX = (pointer.x * size.width) / (2 * zoom);
+  const pointerOffsetY = (pointer.y * size.height) / (2 * zoom);
   const cameraOffsetX = (cameraPosition.x / viewport.width) * size.width;
   const cameraOffsetY = (cameraPosition.y / viewport.height) * size.height;
 
-  return [screenX + cameraOffsetX, screenY - cameraOffsetY];
+  return [centerX + pointerOffsetX + cameraOffsetX, centerY - pointerOffsetY - cameraOffsetY];
 };

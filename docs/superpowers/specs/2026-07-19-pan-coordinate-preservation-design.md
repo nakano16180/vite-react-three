@@ -20,6 +20,11 @@ Treat persisted pixel coordinates as model coordinates. R3F pointer
 intersections already produce world coordinates, so the existing pixel/world
 conversion must not subtract the camera position.
 
+Pointer NDC converts to model pixels around the canvas center. The pointer
+offset from that center is divided by the orthographic camera zoom before the
+camera Pan offset is applied. This keeps previews and persisted geometry under
+the cursor at zoom levels below, equal to, or above `1`.
+
 Add a focused Pan controls component that restores camera position, controls
 target, and zoom from browser-local viewport state, then writes those values
 whenever the controls change. Camera position and target move together,
@@ -44,4 +49,6 @@ Use test-driven development:
 4. Add browser coverage that the visible interaction plane still accepts
    drawing immediately after viewport restoration without a mode change.
 5. Add browser coverage that Pan and zoom both survive reload.
-6. Run unit tests, the focused browser tests, lint, and build.
+6. Add unit coverage for pointer conversion at zoom `0.5`, `1`, and `2`, and
+   derive the browser-test measurement from screen distance divided by zoom.
+7. Run unit tests, the focused browser tests, lint, and build.

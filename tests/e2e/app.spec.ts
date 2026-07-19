@@ -165,6 +165,7 @@ test.describe("drawing workspace", () => {
     });
     expect(zoomBeforeReload).toBeDefined();
     expect(zoomBeforeReload).not.toBe(1);
+    if (zoomBeforeReload === undefined) throw new Error("saved zoom was not available before reload");
 
     await page.getByRole("button", { name: "Measure" }).click();
     await expect(measurement).toBeVisible();
@@ -174,13 +175,16 @@ test.describe("drawing workspace", () => {
 
     const pannedStart = { x: box.x + 100, y: box.y + 100 };
     const pannedEnd = { x: box.x + 260, y: box.y + 180 };
+    const expectedPannedLength = (Math.hypot(160, 80) / zoomBeforeReload).toFixed(1);
     await page.getByRole("button", { name: "Draw" }).click();
     await page.mouse.click(pannedStart.x, pannedStart.y);
+    await page.mouse.move(pannedEnd.x, pannedEnd.y);
+    await expect(page.getByText(`Length: ${expectedPannedLength} px`)).toBeVisible();
     await page.mouse.click(pannedEnd.x, pannedEnd.y);
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Measure" }).click();
-    const pannedMeasurement = page.getByText("Length: 178.9 px");
+    const pannedMeasurement = page.getByText(`Length: ${expectedPannedLength} px`);
     await expect(pannedMeasurement).toBeVisible();
     const afterDraw = await pannedMeasurement.boundingBox();
     if (!afterDraw) throw new Error("panned measurement bounding box was not available before reload");
@@ -193,7 +197,7 @@ test.describe("drawing workspace", () => {
       const value = window.localStorage.getItem("vite-react-three:viewport");
       return value ? (JSON.parse(value) as { zoom?: number }).zoom : undefined;
     });
-    expect(zoomAfterReload).toBeCloseTo(zoomBeforeReload ?? 1);
+    expect(zoomAfterReload).toBeCloseTo(zoomBeforeReload);
 
     await page.mouse.click(box.x + 20, box.y + 300);
     await page.mouse.click(box.x + 100, box.y + 300);

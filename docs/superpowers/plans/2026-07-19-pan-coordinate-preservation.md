@@ -87,6 +87,45 @@ npx playwright test tests/e2e/app.spec.ts --grep "PanとZoom"
 
 Expected: PASS on desktop and mobile.
 
+### Task 0.1: Scale pointer coordinates by zoom
+
+**Files:**
+
+- Modify: `src/lib/canvasCoordinates.test.ts`
+- Modify: `src/lib/canvasCoordinates.ts`
+- Modify: `src/components/DrawingSurface.tsx`
+- Modify: `tests/e2e/app.spec.ts`
+
+**Interfaces:**
+
+- Extends `pointerToModelPixel` with `zoom: number`.
+- Converts NDC offset around the canvas center using `offset / zoom`.
+
+- [ ] **Step 1: Write failing unit tests**
+
+Cover zoom `0.5`, `1`, and `2` with a non-central pointer and assert the model
+pixel offset expands, stays unchanged, or contracts respectively.
+
+- [ ] **Step 2: Verify zoom tests fail**
+
+Run `npm test -- src/lib/canvasCoordinates.test.ts` and expect the non-default
+zoom cases to fail with the old unscaled coordinates.
+
+- [ ] **Step 3: Implement the centered zoom transform**
+
+Calculate canvas center, divide the NDC-derived pointer offset by zoom, then add
+the camera Pan offset. Pass `camera.zoom` from `DrawingSurface`.
+
+- [ ] **Step 4: Correct the browser expectation**
+
+Calculate expected model length as screen distance divided by the saved zoom.
+Assert both the in-progress preview and persisted measurement use that value.
+
+- [ ] **Step 5: Verify focused tests**
+
+Run the coordinate unit test and the Pan/Zoom Playwright test for desktop and
+mobile; expect all to pass.
+
 ### Task 1: Reproduce viewport loss after reload
 
 **Files:**

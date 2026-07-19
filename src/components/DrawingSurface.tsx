@@ -85,7 +85,7 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
   const onClick = (e: { stopPropagation: () => void; pointer: { x: number; y: number } }) => {
     if (!enabled) return;
     e.stopPropagation();
-    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position);
+    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
     const nextWorld = pxToWorld(pointPx[0], pointPx[1]);
     currentPtsPxRef.current = [...currentPtsPxRef.current, pointPx];
     setCurrentPtsWorld((prev) => [...prev, nextWorld]);
@@ -94,7 +94,7 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
 
   const onPointerMove = (e: { pointer: { x: number; y: number } }) => {
     if (!enabled) return;
-    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position);
+    const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
     setHoverWorld(pxToWorld(pointPx[0], pointPx[1]));
   };
 
