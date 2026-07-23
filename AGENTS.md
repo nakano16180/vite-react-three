@@ -25,6 +25,10 @@ Core files:
 
 The Vite dev server sets `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers because DuckDB WASM can require cross-origin isolation.
 
+## Git Workflow
+
+- Before making implementation changes, create or switch to a task-specific feature branch. Do not begin implementation work directly on `main`.
+
 ## Coding Notes
 
 - Keep coordinate storage in pixel coordinates (`Point2D`) unless changing the persistence model intentionally.
