@@ -33,6 +33,7 @@ The Vite dev server sets `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder
 
 - Keep coordinate storage in pixel coordinates (`Point2D`) unless changing the persistence model intentionally.
 - Preserve the fallback JSON table path for environments where the DuckDB spatial extension cannot load.
+- Treat desktop browsers as the supported UI target. Mobile layout and mobile E2E coverage are not required.
 - Prefer extending `src/lib/geometry.ts` for pure geometry behavior and test those helpers directly when a test runner is added.
 - Avoid unrelated UI refactors when changing drawing, measurement, or persistence behavior.
 - When changing canvas interactions, verify draw, edit, measure, pan, undo, clear, refresh, and GeoJSON import/export paths as applicable.

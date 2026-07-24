@@ -233,4 +233,37 @@ test.describe("drawing workspace", () => {
     await page.getByRole("button", { name: "Measure" }).click();
     await expect(page.getByText(/Length: \d+\.\d px/)).toHaveCount(0);
   });
+
+  test("SQL workbenchでgeometryをqueryし履歴・empty・error・cancelを表示する", async ({ page }) => {
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    const box = await getCanvasBox(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    await page.mouse.click(box.x + 100, box.y + 100);
+    await page.mouse.click(box.x + 240, box.y + 180);
+    await page.keyboard.press("Escape");
+
+    const run = page.getByRole("button", { name: "Run query" });
+    await expect(run).toBeEnabled({ timeout: 30_000 });
+    await run.click();
+    await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
+    await expect(page.getByRole("table")).toContainText("geometry_type");
+    await expect(page.getByRole("table")).toContainText("LineString");
+    await expect(page.getByText("1 rows")).toBeVisible();
+    await expect(page.getByText("Complete result")).toBeVisible();
+    await expect(page.locator("#sql-history option")).toHaveCount(2);
+
+    await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features WHERE false");
+    await run.click();
+    await expect(page.getByText("Query completed with no rows.")).toBeVisible();
+
+    await page.getByTestId("sql-editor").fill("SELECT broken");
+    await run.click();
+    await expect(page.getByRole("alert")).toBeVisible();
+
+    await page.getByTestId("sql-editor").fill("SELECT sum(i) FROM range(1000000000) values(i)");
+    await run.click();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByText("Query cancelled.")).toBeVisible();
+  });
 });

@@ -5,6 +5,7 @@ import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
 import { StrokeEditor } from "./components/StrokeEditor";
 import { PanControls } from "./components/PanControls";
+import { SqlWorkbench } from "./components/SqlWorkbench";
 import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
@@ -131,12 +132,14 @@ export default function App() {
   const [simplifyOn, setSimplifyOn] = useState(true);
   const {
     canExport,
+    features,
     handleClear,
     handleExportGeoJSON,
     handleImportGeoJSON,
     handleRefresh,
     handleUndo,
     loading,
+    layers,
     operationNotice,
     persistStroke,
     storageStatus,
@@ -172,17 +175,20 @@ export default function App() {
         handleImportGeoJSON={handleImportGeoJSON}
       />
 
-      <Workspace
-        interactionMode={interactionMode}
-        loading={loading}
-        operationNotice={operationNotice}
-        storageStatus={storageStatus}
-        strokeColor={strokeColor}
-        strokeWidth={strokeWidth}
-        strokes={strokes}
-        onFinishStroke={persistStroke}
-        onUpdateStroke={updateStroke}
-      />
+      <div className="workbench-layout">
+        <Workspace
+          interactionMode={interactionMode}
+          loading={loading}
+          operationNotice={operationNotice}
+          storageStatus={storageStatus}
+          strokeColor={strokeColor}
+          strokeWidth={strokeWidth}
+          strokes={strokes}
+          onFinishStroke={persistStroke}
+          onUpdateStroke={updateStroke}
+        />
+        <SqlWorkbench features={features} layers={layers} storageLoading={loading} />
+      </div>
 
       <StatusFooter storageStatus={storageStatus} />
     </div>
