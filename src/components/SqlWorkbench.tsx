@@ -1,19 +1,11 @@
-import { SQL_EXAMPLES, useQueryWorkbench } from "../hooks/useQueryWorkbench";
-import type { GeometryFeature, Layer } from "../domain/geometryFeature";
+import { SQL_EXAMPLES, type useQueryWorkbench } from "../hooks/useQueryWorkbench";
 
 const displayValue = (value: unknown) =>
   value === null ? "NULL" : typeof value === "object" ? JSON.stringify(value) : String(value);
 
-export function SqlWorkbench({
-  features,
-  layers,
-  storageLoading,
-}: {
-  features: GeometryFeature[];
-  layers: Layer[];
-  storageLoading: boolean;
-}) {
-  const query = useQueryWorkbench(features, layers, storageLoading);
+export function SqlWorkbench({ query }: { query: ReturnType<typeof useQueryWorkbench> }) {
+  const renderedRowIndexes = new Set(query.temporaryStrokes.map(({ id }) => Number(id.replace("query-result-", ""))));
+
   return (
     <aside className="sql-workbench" data-testid="sql-workbench">
       <div className="sql-workbench__heading">
@@ -104,7 +96,7 @@ export function SqlWorkbench({
               </thead>
               <tbody>
                 {query.result.rows.map((row, index) => (
-                  <tr key={index}>
+                  <tr key={index} data-query-geometry={renderedRowIndexes.has(index) ? "rendered" : undefined}>
                     {query.result!.columns.map((column) => (
                       <td key={column.name}>{displayValue(row[column.name])}</td>
                     ))}
@@ -114,6 +106,11 @@ export function SqlWorkbench({
             </table>
           </div>
         </section>
+      )}
+      {query.temporaryStrokes.length > 0 && (
+        <div className="query-message" data-testid="temporary-result-count">
+          {query.temporaryStrokes.length} geometries rendered temporarily
+        </div>
       )}
     </aside>
   );

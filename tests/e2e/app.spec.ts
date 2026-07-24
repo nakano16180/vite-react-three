@@ -234,7 +234,7 @@ test.describe("drawing workspace", () => {
     await expect(page.getByText(/Length: \d+\.\d px/)).toHaveCount(0);
   });
 
-  test("SQL workbenchでgeometryをqueryし履歴・empty・error・cancelを表示する", async ({ page }) => {
+  test("SQL result geometryを一時描画し永続化せず、query lifecycleを表示する", async ({ page }) => {
     test.setTimeout(120_000);
     await gotoApp(page);
     const box = await getCanvasBox(page);
@@ -251,19 +251,34 @@ test.describe("drawing workspace", () => {
     await expect(page.getByRole("table")).toContainText("LineString");
     await expect(page.getByText("1 rows")).toBeVisible();
     await expect(page.getByText("Complete result")).toBeVisible();
+    await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
+    await expect(page.locator('tr[data-query-geometry="rendered"]')).toHaveCount(1);
+    expect(await exportFeatureCount(page)).toBe(1);
     await expect(page.locator("#sql-history option")).toHaveCount(2);
 
+    await page.reload();
+    await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
+    expect(await exportFeatureCount(page)).toBe(1);
+
+    await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByTestId("query-status")).toHaveText("success");
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
+
+    const runAfterReload = page.getByRole("button", { name: "Run query" });
     await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features WHERE false");
-    await run.click();
+    await runAfterReload.click();
     await expect(page.getByText("Query completed with no rows.")).toBeVisible();
 
     await page.getByTestId("sql-editor").fill("SELECT broken");
-    await run.click();
+    await runAfterReload.click();
     await expect(page.getByRole("alert")).toBeVisible();
 
     await page.getByTestId("sql-editor").fill("SELECT sum(i) FROM range(1000000000) values(i)");
-    await run.click();
+    await runAfterReload.click();
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByText("Query cancelled.")).toBeVisible();
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
   });
 });

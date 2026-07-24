@@ -9,6 +9,7 @@ import { SqlWorkbench } from "./components/SqlWorkbench";
 import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
+import { useQueryWorkbench } from "./hooks/useQueryWorkbench";
 
 type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
@@ -20,6 +21,7 @@ interface WorkspaceProps {
   strokeColor: string;
   strokeWidth: number;
   strokes: RenderableStroke[];
+  temporaryStrokes: RenderableStroke[];
   onFinishStroke: ReturnType<typeof useGeometryFeatures>["persistStroke"];
   onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
 }
@@ -32,6 +34,7 @@ function Workspace({
   strokeColor,
   strokeWidth,
   strokes,
+  temporaryStrokes,
   onFinishStroke,
   onUpdateStroke,
 }: WorkspaceProps) {
@@ -50,7 +53,7 @@ function Workspace({
             <PanControls enabled={interactionMode === "pan"} />
 
             <Scene
-              strokes={strokes}
+              strokes={[...strokes, ...temporaryStrokes]}
               hideStrokes={interactionMode === "edit"}
               showMeasurements={interactionMode === "measure"}
             />
@@ -146,6 +149,7 @@ export default function App() {
     strokes,
     updateStroke,
   } = useGeometryFeatures(strokeColor, strokeWidth, simplifyOn);
+  const query = useQueryWorkbench(features, layers, loading);
 
   return (
     <div
@@ -184,10 +188,11 @@ export default function App() {
           strokeColor={strokeColor}
           strokeWidth={strokeWidth}
           strokes={strokes}
+          temporaryStrokes={query.temporaryStrokes}
           onFinishStroke={persistStroke}
           onUpdateStroke={updateStroke}
         />
-        <SqlWorkbench features={features} layers={layers} storageLoading={loading} />
+        <SqlWorkbench query={query} />
       </div>
 
       <StatusFooter storageStatus={storageStatus} />

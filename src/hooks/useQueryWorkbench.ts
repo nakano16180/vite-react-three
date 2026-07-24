@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createQueryRuntime, type QueryResult, type QueryRuntime } from "../db/queryRuntime";
 import type { GeometryFeature, Layer } from "../domain/geometryFeature";
+import type { RenderableStroke } from "../domain/renderableStroke";
+import { queryResultStrokes } from "../lib/queryResultGeometry";
 
 export type QueryUiStatus = "initializing" | "ready" | "running" | "cancelled" | "empty" | "success" | "error";
 
 export const SQL_EXAMPLES = [
-  { label: "Filter features", sql: "SELECT id, geometry_type, layer_id FROM geometry_features ORDER BY feature_order" },
+  {
+    label: "Filter features",
+    sql: "SELECT id, geometry_type, geometry_geojson, layer_id FROM geometry_features ORDER BY feature_order",
+  },
   {
     label: "Measure geometry",
     sql: "SELECT id, ST_Length(ST_GeomFromGeoJSON(geometry_geojson)) AS length FROM geometry_features",
@@ -24,10 +29,12 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
   const [history, setHistory] = useState<string[]>([]);
   const [status, setStatus] = useState<QueryUiStatus>("initializing");
   const [result, setResult] = useState<QueryResult | null>(null);
+  const [temporaryStrokes, setTemporaryStrokes] = useState<RenderableStroke[]>([]);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     if (storageLoading) return;
+    setTemporaryStrokes([]);
     const snapshot = { features, layers };
     queueRef.current = queueRef.current.then(async () => {
       try {
@@ -56,12 +63,14 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
     if (!runtime) return;
     const request = ++requestRef.current;
     setStatus("running");
+    setTemporaryStrokes([]);
     setError(undefined);
     setHistory((current) => [sql, ...current.filter((entry) => entry !== sql)].slice(0, 10));
     try {
       const next = await runtime.execute(sql);
       if (request !== requestRef.current || !next) return;
       setResult(next);
+      setTemporaryStrokes(queryResultStrokes(next));
       setStatus(next.status);
     } catch (cause) {
       if (request !== requestRef.current) return;
@@ -74,8 +83,9 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
   const cancel = useCallback(async () => {
     requestRef.current += 1;
     await runtimeRef.current?.cancel();
+    setTemporaryStrokes([]);
     setStatus("cancelled");
   }, []);
 
-  return { cancel, error, execute, history, result, setSql, sql, status };
+  return { cancel, error, execute, history, result, setSql, sql, status, temporaryStrokes };
 }

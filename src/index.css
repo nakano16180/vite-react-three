@@ -168,6 +168,14 @@ textarea {
   background: #eef2f7;
 }
 
+.query-table-wrap tr[data-query-geometry="rendered"] td {
+  background: #fdf2f8;
+}
+
+.query-table-wrap tr[data-query-geometry="rendered"] td:first-child {
+  box-shadow: inset 3px 0 #ec4899;
+}
+
 .query-table-wrap th small {
   display: block;
   color: #718096;
