@@ -305,12 +305,18 @@ test.describe("drawing workspace", () => {
     await page.mouse.click(box.x + 100, box.y + 100);
     await page.mouse.click(box.x + 240, box.y + 180);
     await page.keyboard.press("Escape");
+    const canvas = page.getByTestId("drawing-canvas");
+    const canvasBeforeQuery = await canvas.screenshot();
 
     const sql =
       "SELECT geometry_geojson, 'road' AS category, 7 AS score FROM geometry_features WHERE layer_id = 'default'";
     await page.getByTestId("sql-editor").fill(sql);
     await page.getByRole("button", { name: "Run query" }).click();
     await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
+    await expect(page.getByRole("table")).toContainText("road");
+    await expect(page.getByRole("table")).toContainText("7");
+    const canvasWithTemporaryResult = await canvas.screenshot();
+    expect(canvasWithTemporaryResult.equals(canvasBeforeQuery)).toBe(false);
     await expect(page.getByTestId("query-promotion-duplicate-policy")).toContainText(
       "creates a new layer with new feature IDs"
     );
