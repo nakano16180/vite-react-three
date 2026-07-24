@@ -18,6 +18,7 @@ main {
 } /* ←これ重要。子の%高さでの増殖を防ぐ */
 
 button,
+input,
 select,
 textarea {
   font: inherit;
@@ -70,6 +71,7 @@ textarea {
 }
 
 .sql-workbench textarea,
+.sql-workbench input,
 .sql-workbench select {
   width: 100%;
   border: 1px solid #cbd5e1;
@@ -87,6 +89,10 @@ textarea {
 }
 
 .sql-workbench select {
+  padding: 8px;
+}
+
+.sql-workbench input {
   padding: 8px;
 }
 
@@ -127,6 +133,29 @@ textarea {
 .query-message--error {
   color: #991b1b;
   background: #fee2e2;
+}
+
+.query-promotion {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #dbe2ea;
+}
+
+.query-promotion .query-message,
+.query-promotion .sql-label {
+  margin: 0;
+}
+
+.query-promotion button {
+  justify-self: start;
+  padding: 7px 12px;
+}
+
+.query-promotion small {
+  color: #536176;
+  line-height: 1.4;
 }
 
 .query-results {

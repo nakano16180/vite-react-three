@@ -144,6 +144,7 @@ export default function App() {
     loading,
     layers,
     operationNotice,
+    promoteQueryResult,
     persistStroke,
     storageStatus,
     strokes,
@@ -192,7 +193,12 @@ export default function App() {
           onFinishStroke={persistStroke}
           onUpdateStroke={updateStroke}
         />
-        <SqlWorkbench query={query} />
+        <SqlWorkbench
+          query={query}
+          onPromote={(layerName) =>
+            query.result ? promoteQueryResult(query.result, layerName) : Promise.resolve({ status: "empty" as const })
+          }
+        />
       </div>
 
       <StatusFooter storageStatus={storageStatus} />

@@ -13,6 +13,9 @@ import { simplifyFeatureGeometry, toRenderableStroke } from "../domain/renderabl
 import { loadExportFeatureCollection } from "../lib/exportGeometryFeatures";
 import { importGeometryFeaturesWithContext } from "../lib/importGeometryFeatures";
 import { createPromiseQueue } from "../lib/promiseQueue";
+import type { QueryResult } from "../db/queryRuntime";
+import { queryResultFeatures } from "../lib/queryResultGeometry";
+import { createId } from "../lib/id";
 
 export type GeometryType = "line" | "polygon";
 
@@ -23,6 +26,10 @@ export interface StorageStatus {
   migrationWarning?: string;
   error?: string;
 }
+
+export type QueryPromotionResult =
+  | { status: "saved"; count: number; layerName: string }
+  | { status: "invalid-name" | "empty" | "failed" };
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -165,6 +172,27 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     [runRepositoryAction, simplifyOn, strokeColor, strokeWidth]
   );
 
+  const promoteQueryResult = useCallback(
+    async (result: QueryResult, requestedLayerName: string): Promise<QueryPromotionResult> => {
+      const layerName = requestedLayerName.trim();
+      if (!layerName) return { status: "invalid-name" };
+      const layerId = createId();
+      const promotedFeatures = queryResultFeatures(result, layerId);
+      if (promotedFeatures.length === 0) return { status: "empty" };
+      const layer: Layer = {
+        id: layerId,
+        name: layerName,
+        visible: true,
+        order: layers.reduce((highest, candidate) => Math.max(highest, candidate.order), -1) + 1,
+        createdAt: new Date().toISOString(),
+      };
+      const saved = await runRepositoryAction((repository) => repository.importGeoJSON([layer], promotedFeatures));
+      if (!saved) return { status: "failed" };
+      return { status: "saved", count: promotedFeatures.length, layerName };
+    },
+    [layers, runRepositoryAction]
+  );
+
   const updateStroke = useCallback(
     async (id: string, points: Point2D[]) => {
       const feature = features.find((candidate) => candidate.id === id);
@@ -249,6 +277,7 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     storageStatus,
     strokes,
     persistStroke,
+    promoteQueryResult,
     updateStroke,
     handleUndo,
     handleClear,

@@ -59,14 +59,16 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
   );
 
   const execute = useCallback(async () => {
-    const runtime = runtimeRef.current;
-    if (!runtime) return;
     const request = ++requestRef.current;
     setStatus("running");
     setTemporaryStrokes([]);
     setError(undefined);
     setHistory((current) => [sql, ...current.filter((entry) => entry !== sql)].slice(0, 10));
     try {
+      await queueRef.current;
+      if (request !== requestRef.current) return;
+      const runtime = runtimeRef.current;
+      if (!runtime) throw new Error("Query runtime is unavailable.");
       const next = await runtime.execute(sql);
       if (request !== requestRef.current || !next) return;
       setResult(next);
