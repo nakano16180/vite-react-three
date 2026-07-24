@@ -5,9 +5,11 @@ import { Scene } from "./components/Scene";
 import { DrawingSurface } from "./components/DrawingSurface";
 import { StrokeEditor } from "./components/StrokeEditor";
 import { PanControls } from "./components/PanControls";
+import { SqlWorkbench } from "./components/SqlWorkbench";
 import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
+import { useQueryWorkbench } from "./hooks/useQueryWorkbench";
 
 type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
@@ -19,6 +21,7 @@ interface WorkspaceProps {
   strokeColor: string;
   strokeWidth: number;
   strokes: RenderableStroke[];
+  temporaryStrokes: RenderableStroke[];
   onFinishStroke: ReturnType<typeof useGeometryFeatures>["persistStroke"];
   onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
 }
@@ -31,6 +34,7 @@ function Workspace({
   strokeColor,
   strokeWidth,
   strokes,
+  temporaryStrokes,
   onFinishStroke,
   onUpdateStroke,
 }: WorkspaceProps) {
@@ -49,7 +53,7 @@ function Workspace({
             <PanControls enabled={interactionMode === "pan"} />
 
             <Scene
-              strokes={strokes}
+              strokes={[...strokes, ...temporaryStrokes]}
               hideStrokes={interactionMode === "edit"}
               showMeasurements={interactionMode === "measure"}
             />
@@ -131,18 +135,22 @@ export default function App() {
   const [simplifyOn, setSimplifyOn] = useState(true);
   const {
     canExport,
+    features,
     handleClear,
     handleExportGeoJSON,
     handleImportGeoJSON,
     handleRefresh,
     handleUndo,
     loading,
+    layers,
     operationNotice,
+    promoteQueryResult,
     persistStroke,
     storageStatus,
     strokes,
     updateStroke,
   } = useGeometryFeatures(strokeColor, strokeWidth, simplifyOn);
+  const query = useQueryWorkbench(features, layers, loading);
 
   return (
     <div
@@ -172,17 +180,26 @@ export default function App() {
         handleImportGeoJSON={handleImportGeoJSON}
       />
 
-      <Workspace
-        interactionMode={interactionMode}
-        loading={loading}
-        operationNotice={operationNotice}
-        storageStatus={storageStatus}
-        strokeColor={strokeColor}
-        strokeWidth={strokeWidth}
-        strokes={strokes}
-        onFinishStroke={persistStroke}
-        onUpdateStroke={updateStroke}
-      />
+      <div className="workbench-layout">
+        <Workspace
+          interactionMode={interactionMode}
+          loading={loading}
+          operationNotice={operationNotice}
+          storageStatus={storageStatus}
+          strokeColor={strokeColor}
+          strokeWidth={strokeWidth}
+          strokes={strokes}
+          temporaryStrokes={query.temporaryStrokes}
+          onFinishStroke={persistStroke}
+          onUpdateStroke={updateStroke}
+        />
+        <SqlWorkbench
+          query={query}
+          onPromote={(layerName) =>
+            query.result ? promoteQueryResult(query.result, layerName) : Promise.resolve({ status: "empty" as const })
+          }
+        />
+      </div>
 
       <StatusFooter storageStatus={storageStatus} />
     </div>

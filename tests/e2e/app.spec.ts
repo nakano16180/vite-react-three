@@ -18,16 +18,31 @@ const getCanvasBox = async (page: Page) => {
   return box;
 };
 
-const exportFeatureCount = async (page: Page) => {
+interface ExportedFeatureCollection {
+  features: Array<{
+    id: string;
+    properties: Record<string, unknown>;
+    workbench: {
+      layerId: string;
+      style: { strokeColor: string; strokeWidth: number };
+    };
+  }>;
+  workbench: {
+    layers: Array<{ id: string; name: string }>;
+  };
+}
+
+const exportFeatures = async (page: Page): Promise<ExportedFeatureCollection> => {
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export GeoJSON" }).click();
   const download = await downloadPromise;
   const stream = await download.createReadStream();
   let text = "";
   for await (const chunk of stream) text += chunk.toString();
-  const collection = JSON.parse(text) as { features: unknown[] };
-  return collection.features.length;
+  return JSON.parse(text) as ExportedFeatureCollection;
 };
+
+const exportFeatureCount = async (page: Page) => (await exportFeatures(page)).features.length;
 
 test.describe("drawing workspace", () => {
   test.describe.configure({ mode: "serial" });
@@ -232,5 +247,115 @@ test.describe("drawing workspace", () => {
     await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
     await page.getByRole("button", { name: "Measure" }).click();
     await expect(page.getByText(/Length: \d+\.\d px/)).toHaveCount(0);
+  });
+
+  test("SQL result geometryを一時描画し永続化せず、query lifecycleを表示する", async ({ page }) => {
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    const box = await getCanvasBox(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    await page.mouse.click(box.x + 100, box.y + 100);
+    await page.mouse.click(box.x + 240, box.y + 180);
+    await page.keyboard.press("Escape");
+
+    const run = page.getByRole("button", { name: "Run query" });
+    await expect(run).toBeEnabled({ timeout: 30_000 });
+    await run.click();
+    await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
+    await expect(page.getByRole("table")).toContainText("geometry_type");
+    await expect(page.getByRole("table")).toContainText("LineString");
+    await expect(page.getByText("1 rows")).toBeVisible();
+    await expect(page.getByText("Complete result")).toBeVisible();
+    await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
+    await expect(page.locator('tr[data-query-geometry="rendered"]')).toHaveCount(1);
+    expect(await exportFeatureCount(page)).toBe(1);
+    await expect(page.locator("#sql-history option")).toHaveCount(2);
+
+    await page.reload();
+    await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
+    expect(await exportFeatureCount(page)).toBe(1);
+
+    await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByTestId("query-status")).toHaveText("success");
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
+
+    const runAfterReload = page.getByRole("button", { name: "Run query" });
+    await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features WHERE false");
+    await runAfterReload.click();
+    await expect(page.getByText("Query completed with no rows.")).toBeVisible();
+
+    await page.getByTestId("sql-editor").fill("SELECT broken");
+    await runAfterReload.click();
+    await expect(page.getByRole("alert")).toBeVisible();
+
+    await page.getByTestId("sql-editor").fill("SELECT sum(i) FROM range(1000000000) values(i)");
+    await runAfterReload.click();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByText("Query cancelled.")).toBeVisible();
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
+  });
+
+  test("query resultを名前付きlayerへ保存しattributesをreload後も保持する", async ({ page }) => {
+    test.setTimeout(150_000);
+    await gotoApp(page);
+    const box = await getCanvasBox(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    await page.mouse.click(box.x + 100, box.y + 100);
+    await page.mouse.click(box.x + 240, box.y + 180);
+    await page.keyboard.press("Escape");
+    const canvas = page.getByTestId("drawing-canvas");
+    const canvasBeforeQuery = await canvas.screenshot();
+
+    const sql =
+      "SELECT geometry_geojson, 'road' AS category, 7 AS score FROM geometry_features WHERE layer_id = 'default'";
+    await page.getByTestId("sql-editor").fill(sql);
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
+    await expect(page.getByRole("table")).toContainText("road");
+    await expect(page.getByRole("table")).toContainText("7");
+    const canvasWithTemporaryResult = await canvas.screenshot();
+    expect(canvasWithTemporaryResult.equals(canvasBeforeQuery)).toBe(false);
+    await expect(page.getByTestId("query-promotion-duplicate-policy")).toContainText(
+      "creates a new layer with new feature IDs"
+    );
+
+    await page.getByTestId("query-layer-name").fill("Road analysis");
+    await page.getByRole("button", { name: "Save as layer" }).click();
+    await expect(page.getByTestId("query-promotion-status")).toHaveText("Saved 1 features to “Road analysis”.");
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
+
+    const firstExport = await exportFeatures(page);
+    expect(firstExport.features).toHaveLength(2);
+    const firstPromoted = firstExport.features.find((feature) => feature.properties.category === "road");
+    expect(firstPromoted).toBeDefined();
+    expect(firstPromoted?.properties.score).toBe(7);
+    expect(firstPromoted?.workbench.style).toMatchObject({ strokeColor: "#ec4899", strokeWidth: 5 });
+    const firstLayer = firstExport.workbench.layers.find((layer) => layer.name === "Road analysis");
+    expect(firstLayer).toBeDefined();
+    expect(firstPromoted?.workbench.layerId).toBe(firstLayer?.id);
+
+    await page.getByRole("button", { name: "Refresh" }).click();
+    expect(await exportFeatureCount(page)).toBe(2);
+    await page.reload();
+    await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    const reloadedExport = await exportFeatures(page);
+    expect(reloadedExport.features.find((feature) => feature.properties.category === "road")?.properties.score).toBe(7);
+
+    await page.getByTestId("sql-editor").fill(sql);
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
+    await page.getByTestId("query-layer-name").fill("Road analysis");
+    await page.getByRole("button", { name: "Save as layer" }).click();
+    await expect(page.getByTestId("query-promotion-status")).toHaveText("Saved 1 features to “Road analysis”.");
+
+    const repeatedExport = await exportFeatures(page);
+    const promotedFeatures = repeatedExport.features.filter((feature) => feature.properties.category === "road");
+    const promotedLayers = repeatedExport.workbench.layers.filter((layer) => layer.name === "Road analysis");
+    expect(promotedFeatures).toHaveLength(2);
+    expect(new Set(promotedFeatures.map((feature) => feature.id)).size).toBe(2);
+    expect(promotedLayers).toHaveLength(2);
+    expect(new Set(promotedLayers.map((layer) => layer.id)).size).toBe(2);
   });
 });
