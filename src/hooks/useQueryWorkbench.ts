@@ -16,6 +16,10 @@ export const SQL_EXAMPLES = [
     sql: "SELECT id, ST_Length(ST_GeomFromGeoJSON(geometry_geojson)) AS length FROM geometry_features",
   },
   {
+    label: "Construct geometry",
+    sql: "SELECT 'constructed-line' AS name, ST_AsGeoJSON(ST_GeomFromText('LINESTRING (100 100, 300 200)')) AS geometry_geojson",
+  },
+  {
     label: "Convert geometry",
     sql: "SELECT id, ST_AsText(ST_GeomFromGeoJSON(geometry_geojson)) AS geometry_wkt FROM geometry_features",
   },

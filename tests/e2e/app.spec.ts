@@ -297,6 +297,40 @@ test.describe("drawing workspace", () => {
     await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
   });
 
+  test("Examplesのconstructing SQLをtableとtemporary layerへ表示し永続化しない", async ({ page }) => {
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+
+    const examples = page.locator("#sql-examples");
+    await expect(examples.locator("option")).toHaveText([
+      "Select an example",
+      "Filter features",
+      "Measure geometry",
+      "Construct geometry",
+      "Convert geometry",
+    ]);
+
+    const canvas = page.getByTestId("drawing-canvas");
+    const canvasBeforeQuery = await canvas.screenshot();
+    await examples.selectOption({ label: "Construct geometry" });
+    await expect(page.getByTestId("sql-editor")).toContainText("ST_GeomFromText");
+    await page.getByRole("button", { name: "Run query" }).click();
+
+    await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
+    await expect(page.getByRole("table")).toContainText("constructed-line");
+    await expect(page.getByRole("table")).toContainText("LineString");
+    await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
+    await expect(page.locator('tr[data-query-geometry="rendered"]')).toHaveCount(1);
+    expect((await canvas.screenshot()).equals(canvasBeforeQuery)).toBe(false);
+    expect(await exportFeatureCount(page)).toBe(0);
+
+    await page.reload();
+    await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
+    expect(await exportFeatureCount(page)).toBe(0);
+  });
+
   test("query resultを名前付きlayerへ保存しattributesをreload後も保持する", async ({ page }) => {
     test.setTimeout(150_000);
     await gotoApp(page);
