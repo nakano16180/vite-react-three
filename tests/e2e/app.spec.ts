@@ -312,6 +312,7 @@ test.describe("drawing workspace", () => {
     ]);
 
     const canvas = page.getByTestId("drawing-canvas");
+    const persistentBeforeQuery = await exportFeatures(page);
     const canvasBeforeQuery = await canvas.screenshot();
     await examples.selectOption({ label: "Construct geometry" });
     await expect(page.getByTestId("sql-editor")).toContainText("ST_GeomFromText");
@@ -323,12 +324,16 @@ test.describe("drawing workspace", () => {
     await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
     await expect(page.locator('tr[data-query-geometry="rendered"]')).toHaveCount(1);
     expect((await canvas.screenshot()).equals(canvasBeforeQuery)).toBe(false);
-    expect(await exportFeatureCount(page)).toBe(0);
+    const persistentAfterQuery = await exportFeatures(page);
+    expect(persistentAfterQuery.features).toEqual(persistentBeforeQuery.features);
+    expect(persistentAfterQuery.workbench.layers).toEqual(persistentBeforeQuery.workbench.layers);
 
     await page.reload();
     await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
     await expect(page.getByTestId("temporary-result-count")).toHaveCount(0);
-    expect(await exportFeatureCount(page)).toBe(0);
+    const persistentAfterReload = await exportFeatures(page);
+    expect(persistentAfterReload.features).toEqual(persistentBeforeQuery.features);
+    expect(persistentAfterReload.workbench.layers).toEqual(persistentBeforeQuery.workbench.layers);
   });
 
   test("query resultを名前付きlayerへ保存しattributesをreload後も保持する", async ({ page }) => {
