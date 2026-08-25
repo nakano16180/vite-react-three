@@ -47,14 +47,14 @@ Exit criteria:
 
 Goal: make DuckDB the visible center of the application.
 
-- Add a SQL editor with query execution, history, cancellation, and clear error
-  messages.
-- Expose documented read-only views for features and layers.
-- Show tabular query results alongside the canvas.
-- Render geometry returned by a query as a temporary result layer.
-- Allow a result layer to be saved as a persistent layer.
-- Include runnable examples for filtering, measuring, constructing, and
-  converting geometry.
+- [x] Add a SQL editor with query execution, history, cancellation, and clear error
+      messages.
+- [x] Expose documented read-only views for features and layers.
+- [x] Show tabular query results alongside the canvas.
+- [x] Render geometry returned by a query as a temporary result layer.
+- [x] Allow a result layer to be saved as a persistent layer.
+- [x] Include runnable examples for filtering, measuring, constructing, and
+      converting geometry.
 
 Exit criteria:
 
@@ -152,9 +152,9 @@ they directly support a spatial-analysis workflow.
 1. [x] Complete the canonical feature and layer schema.
 2. [x] Add automated tests around geometry persistence and GeoJSON round-trips.
 3. [x] Complete Phase 0 browser workflow coverage.
-4. [ ] Build the SQL editor and tabular result view.
-5. [ ] Render query geometry as a temporary layer.
-6. [ ] Promote query results to persistent layers.
+4. [x] Build the SQL editor and tabular result view.
+5. [x] Render query geometry as a temporary layer.
+6. [x] Promote query results to persistent layers.
 7. [ ] Build the layer panel and synchronized selection.
 
 The first major product milestone is complete when a user can draw or import
@@ -179,6 +179,15 @@ save or export the result entirely in the browser.
 The canonical persistence implementation was merged in PR #36. Phase 0 browser
 workflow coverage was completed on 2026-07-19, including a fix that maps primary
 pointer dragging to Pan instead of the disabled Rotate action.
+
+### Completed on 2026-08-25
+
+- Completed Phase 1 with read-only SQL views and runtime, the SQL editor and
+  tabular results, temporary geometry rendering, persistent layer promotion,
+  and runnable filtering, measuring, constructing, and converting examples.
+- Verified the constructing example in desktop Chromium: its row and geometry
+  result are visible, while persistent features and layers remain unchanged
+  until an explicit save.
 
 ## Today: 2026-07-19
 
@@ -219,13 +228,13 @@ Verification completed on 2026-07-19:
 
 ### Next if the Phase 0 checks are green
 
-- [ ] Draft the SQL editor and tabular result-view design.
-- [ ] Put system invariants before the task list, including read-only query
+- [x] Draft the SQL editor and tabular result-view design.
+- [x] Put system invariants before the task list, including read-only query
       boundaries, result-size limits, cancellation behavior, and the rule that
       query results do not mutate persistent features implicitly.
-- [ ] Add a failure matrix covering invalid SQL, long-running and cancelled
+- [x] Add a failure matrix covering invalid SQL, long-running and cancelled
       queries, empty and large results, geometry/non-geometry columns,
       Spatial/JSON stores, and component unmount or database restart.
-- [ ] Define the smallest vertical slice: execute read-only SQL against
+- [x] Define the smallest vertical slice: execute read-only SQL against
       documented feature/layer views and display tabular results. Temporary
       geometry rendering remains the following milestone.
