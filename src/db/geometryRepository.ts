@@ -453,6 +453,102 @@ export class GeometryRepository {
     });
   }
 
+  async activeLayerId(): Promise<string> {
+    const stored = await this.metadataValue("active_layer_id");
+    if (!stored) return DEFAULT_LAYER_ID;
+    const statement = await this.connection.prepare("SELECT 1 AS present FROM layers WHERE id = ? LIMIT 1;");
+    try {
+      return (await statement.query(stored)).toArray().length > 0 ? stored : DEFAULT_LAYER_ID;
+    } finally {
+      await statement.close();
+    }
+  }
+
+  async setActiveLayer(layerId: string): Promise<void> {
+    await this.assertLayerExists(layerId);
+    await this.setMetadata("active_layer_id", layerId);
+    await this.checkpoint();
+  }
+
+  async updateLayer(layerId: string, changes: { name?: string; visible?: boolean }): Promise<void> {
+    if (changes.name !== undefined) {
+      const name = changes.name.trim();
+      if (!name) throw new Error("Layer name cannot be empty");
+      const statement = await this.connection.prepare("UPDATE layers SET name = ? WHERE id = ?;");
+      try {
+        await statement.query(name, layerId);
+      } finally {
+        await statement.close();
+      }
+    }
+    if (changes.visible !== undefined) {
+      const statement = await this.connection.prepare("UPDATE layers SET visible = ? WHERE id = ?;");
+      try {
+        await statement.query(changes.visible, layerId);
+      } finally {
+        await statement.close();
+      }
+    }
+    await this.checkpoint();
+  }
+
+  async reorderLayers(layerIds: string[]): Promise<void> {
+    const existing = await this.listLayers();
+    if (layerIds.length !== existing.length || new Set(layerIds).size !== layerIds.length) {
+      throw new Error("Layer order must contain every layer exactly once");
+    }
+    const existingIds = new Set(existing.map(({ id }) => id));
+    if (layerIds.some((id) => !existingIds.has(id))) throw new Error("Layer order contains an unknown layer");
+
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      const statement = await this.connection.prepare("UPDATE layers SET sort_order = ? WHERE id = ?;");
+      try {
+        for (const [order, id] of layerIds.entries()) await statement.query(order, id);
+      } finally {
+        await statement.close();
+      }
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the ordering failure; rollback is best-effort.
+      }
+      throw error;
+    }
+    await this.checkpoint();
+  }
+
+  async deleteLayer(layerId: string): Promise<void> {
+    if (layerId === DEFAULT_LAYER_ID) throw new Error("The Default layer cannot be deleted");
+    const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      const deleteFeatures = await this.connection.prepare(`DELETE FROM ${table} WHERE layer_id = ?;`);
+      const deleteLayer = await this.connection.prepare("DELETE FROM layers WHERE id = ?;");
+      try {
+        await deleteFeatures.query(layerId);
+        await deleteLayer.query(layerId);
+        if ((await this.metadataValue("active_layer_id")) === layerId) {
+          await this.setMetadata("active_layer_id", DEFAULT_LAYER_ID);
+        }
+      } finally {
+        await deleteFeatures.close();
+        await deleteLayer.close();
+      }
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the deletion failure; rollback is best-effort.
+      }
+      throw error;
+    }
+    await this.checkpoint();
+  }
+
   async insertLayers(layers: Layer[], deferCheckpoint = false): Promise<void> {
     const statement = await this.connection.prepare(
       `INSERT INTO layers(id, name, visible, sort_order, created_at)

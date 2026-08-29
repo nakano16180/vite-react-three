@@ -28,7 +28,92 @@ textarea {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 410px;
+  grid-template-columns: 240px minmax(0, 1fr) 410px;
+}
+
+.layer-panel {
+  min-width: 0;
+  overflow: auto;
+  padding: 18px 12px;
+  border-right: 1px solid #dbe2ea;
+  background: #f8fafc;
+  color: #172033;
+}
+
+.layer-panel h2 {
+  margin: 2px 0 4px;
+  font-size: 20px;
+}
+
+.layer-panel__hint {
+  margin: 0 0 14px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.layer-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer-item {
+  padding: 8px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: white;
+}
+
+.layer-item[data-active="true"] {
+  border-color: #2563eb;
+  box-shadow: inset 3px 0 #2563eb;
+}
+
+.layer-item__main,
+.layer-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layer-item__main form {
+  min-width: 0;
+  flex: 1;
+}
+
+.layer-item__main form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.layer-item__name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-item__count {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.layer-item__actions {
+  justify-content: flex-end;
+  margin-top: 7px;
+}
+
+.layer-item__actions button {
+  padding: 2px 6px;
+  font-size: 11px;
 }
 
 .sql-workbench {

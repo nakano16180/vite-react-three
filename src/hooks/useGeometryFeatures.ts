@@ -39,6 +39,7 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
   const queueRef = useRef(createPromiseQueue());
   const [features, setFeatures] = useState<GeometryFeature[]>([]);
   const [layers, setLayers] = useState<Layer[]>([]);
+  const [activeLayerId, setActiveLayerId] = useState(DEFAULT_LAYER_ID);
   const [loading, setLoading] = useState(true);
   const [operationNotice, setOperationNotice] = useState<string>();
   const [storageStatus, setStorageStatus] = useState<StorageStatus>({
@@ -48,10 +49,15 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
   });
 
   const loadRepositoryState = useCallback(async (repository: GeometryRepository, generation: number) => {
-    const [nextFeatures, nextLayers] = await Promise.all([repository.listFeatures(), repository.listLayers()]);
+    const [nextFeatures, nextLayers, nextActiveLayerId] = await Promise.all([
+      repository.listFeatures(),
+      repository.listLayers(),
+      repository.activeLayerId(),
+    ]);
     if (generationRef.current !== generation || repositoryRef.current !== repository) return false;
     setFeatures(nextFeatures);
     setLayers(nextLayers);
+    setActiveLayerId(nextActiveLayerId);
     setStorageStatus((current) => ({ ...current, error: undefined }));
     return true;
   }, []);
@@ -165,11 +171,39 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       const feature = createGeometryFeature({
         geometry: canonicalGeometry,
         style: { strokeColor, strokeWidth },
-        layerId: DEFAULT_LAYER_ID,
+        layerId: activeLayerId,
       });
       await runRepositoryAction((repository) => repository.insertFeature(feature));
     },
-    [runRepositoryAction, simplifyOn, strokeColor, strokeWidth]
+    [activeLayerId, runRepositoryAction, simplifyOn, strokeColor, strokeWidth]
+  );
+
+  const setActiveLayer = useCallback(
+    (layerId: string) => runRepositoryAction((repository) => repository.setActiveLayer(layerId)).then(() => undefined),
+    [runRepositoryAction]
+  );
+
+  const setLayerVisibility = useCallback(
+    (layerId: string, visible: boolean) =>
+      runRepositoryAction((repository) => repository.updateLayer(layerId, { visible })).then(() => undefined),
+    [runRepositoryAction]
+  );
+
+  const renameLayer = useCallback(
+    (layerId: string, name: string) =>
+      runRepositoryAction((repository) => repository.updateLayer(layerId, { name })).then(() => undefined),
+    [runRepositoryAction]
+  );
+
+  const reorderLayers = useCallback(
+    (layerIds: string[]) =>
+      runRepositoryAction((repository) => repository.reorderLayers(layerIds)).then(() => undefined),
+    [runRepositoryAction]
+  );
+
+  const deleteLayer = useCallback(
+    (layerId: string) => runRepositoryAction((repository) => repository.deleteLayer(layerId)).then(() => undefined),
+    [runRepositoryAction]
   );
 
   const promoteQueryResult = useCallback(
@@ -265,18 +299,34 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     }
   }, [loading]);
 
-  const strokes = useMemo(() => features.map(toRenderableStroke), [features]);
+  const strokes = useMemo(() => {
+    const layerOrder = new Map(layers.map((layer, index) => [layer.id, { visible: layer.visible, index }]));
+    return features
+      .filter((feature) => layerOrder.get(feature.layerId)?.visible !== false)
+      .sort(
+        (left, right) =>
+          (layerOrder.get(left.layerId)?.index ?? Number.MAX_SAFE_INTEGER) -
+          (layerOrder.get(right.layerId)?.index ?? Number.MAX_SAFE_INTEGER)
+      )
+      .map(toRenderableStroke);
+  }, [features, layers]);
   const canExport = !loading && repositoryRef.current !== null;
 
   return {
     features,
     layers,
+    activeLayerId,
     loading,
     operationNotice,
     canExport,
     storageStatus,
     strokes,
     persistStroke,
+    setActiveLayer,
+    setLayerVisibility,
+    renameLayer,
+    reorderLayers,
+    deleteLayer,
     promoteQueryResult,
     updateStroke,
     handleUndo,

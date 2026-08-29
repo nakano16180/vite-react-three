@@ -6,6 +6,7 @@ import { DrawingSurface } from "./components/DrawingSurface";
 import { StrokeEditor } from "./components/StrokeEditor";
 import { PanControls } from "./components/PanControls";
 import { SqlWorkbench } from "./components/SqlWorkbench";
+import { LayerPanel } from "./components/LayerPanel";
 import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
@@ -134,7 +135,9 @@ export default function App() {
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [simplifyOn, setSimplifyOn] = useState(true);
   const {
+    activeLayerId,
     canExport,
+    deleteLayer,
     features,
     handleClear,
     handleExportGeoJSON,
@@ -145,6 +148,10 @@ export default function App() {
     layers,
     operationNotice,
     promoteQueryResult,
+    renameLayer,
+    reorderLayers,
+    setActiveLayer,
+    setLayerVisibility,
     persistStroke,
     storageStatus,
     strokes,
@@ -181,6 +188,17 @@ export default function App() {
       />
 
       <div className="workbench-layout">
+        <LayerPanel
+          layers={layers}
+          features={features}
+          activeLayerId={activeLayerId}
+          disabled={loading}
+          onSetActive={setActiveLayer}
+          onSetVisibility={setLayerVisibility}
+          onRename={renameLayer}
+          onReorder={reorderLayers}
+          onDelete={deleteLayer}
+        />
         <Workspace
           interactionMode={interactionMode}
           loading={loading}
