@@ -22,6 +22,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
     };
 
     return strokes.map((s) => {
+      const renderOrder = s.renderOrder ?? 0;
       const ptsPx = s.ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
       const points = ptsPx.map(([x, y]) => pxToWorld(x, y));
       const isRenderable = points.length >= 2;
@@ -33,6 +34,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
         : points[points.length - 1];
       return {
         ...s,
+        renderOrder,
         isRenderable,
         points: isPolygon ? [...points, points[0]] : points,
         shape,
@@ -49,12 +51,26 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
             {!s.isRenderable ? null : (
               <>
                 {s.shape && (
-                  <mesh position={[0, 0, -0.001]}>
+                  <mesh position={[0, 0, -0.001]} renderOrder={s.renderOrder * 2}>
                     <shapeGeometry args={[s.shape]} />
-                    <meshBasicMaterial color={s.color} transparent opacity={0.25} side={THREE.DoubleSide} />
+                    <meshBasicMaterial
+                      color={s.color}
+                      transparent
+                      opacity={0.25}
+                      side={THREE.DoubleSide}
+                      depthTest={false}
+                      depthWrite={false}
+                    />
                   </mesh>
                 )}
-                <Line points={s.points} color={s.color} lineWidth={s.width} />
+                <Line
+                  points={s.points}
+                  color={s.color}
+                  lineWidth={s.width}
+                  renderOrder={s.renderOrder * 2 + 1}
+                  depthTest={false}
+                  depthWrite={false}
+                />
                 {showMeasurements && s.measurementPosition && (
                   <Html position={s.measurementPosition} center style={{ pointerEvents: "none" }}>
                     <div

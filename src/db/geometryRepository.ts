@@ -425,6 +425,7 @@ export class GeometryRepository {
     try {
       await this.connection.query(`DELETE FROM ${table};`);
       await this.connection.query(`DELETE FROM layers WHERE id <> '${DEFAULT_LAYER_ID}';`);
+      await this.setMetadata("active_layer_id", DEFAULT_LAYER_ID);
       await this.connection.query("COMMIT;");
     } catch (error) {
       try {

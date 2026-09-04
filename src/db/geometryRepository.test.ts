@@ -916,7 +916,9 @@ describe("undo insertion order", () => {
 describe("transactional clear", () => {
   it.each(["spatial", "json"] as const)("%s Clearはfeatureとcustom layerを同じtransactionで削除する", async (store) => {
     const query = vi.fn().mockResolvedValue(result());
-    const repository = new GeometryRepository({ query } as unknown as AsyncDuckDBConnection, {
+    const metadataQuery = vi.fn().mockResolvedValue(result());
+    const prepare = vi.fn().mockResolvedValue({ query: metadataQuery, close: vi.fn() });
+    const repository = new GeometryRepository({ query, prepare } as unknown as AsyncDuckDBConnection, {
       opfs: false,
       spatial: store === "spatial",
       store,
@@ -930,6 +932,10 @@ describe("transactional clear", () => {
       `DELETE FROM layers WHERE id <> '${DEFAULT_LAYER_ID}';`,
       "COMMIT;",
     ]);
+    expect(prepare).toHaveBeenCalledWith(
+      "INSERT INTO app_metadata(key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value;"
+    );
+    expect(metadataQuery).toHaveBeenCalledWith("active_layer_id", DEFAULT_LAYER_ID);
   });
 
   it("layer削除失敗時はfeature削除もrollbackする", async () => {

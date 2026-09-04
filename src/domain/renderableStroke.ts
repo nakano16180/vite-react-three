@@ -7,6 +7,7 @@ export interface RenderableStroke {
   width: number;
   ptsPx: Point2D[];
   geomType: "line" | "polygon";
+  renderOrder?: number;
   length?: number;
   area?: number;
   perimeter?: number;
@@ -75,7 +76,7 @@ export const simplifyFeatureGeometry = (geometry: FeatureGeometry, tolerance: nu
   };
 };
 
-export const toRenderableStroke = (feature: GeometryFeature): RenderableStroke => {
+export const toRenderableStroke = (feature: GeometryFeature, renderOrder?: number): RenderableStroke => {
   const polygon = feature.geometry.type === "Polygon";
   const ptsPx = feature.geometry.coordinates;
   return {
@@ -84,6 +85,7 @@ export const toRenderableStroke = (feature: GeometryFeature): RenderableStroke =
     width: feature.style.strokeWidth,
     ptsPx,
     geomType: polygon ? "polygon" : "line",
+    renderOrder,
     length: polygon ? undefined : getPolylineLength(ptsPx),
     area: polygon ? getPolygonArea(ptsPx) : undefined,
     perimeter: polygon ? getPolygonPerimeter(ptsPx) : undefined,

@@ -6,11 +6,11 @@ interface LayerPanelProps {
   features: GeometryFeature[];
   activeLayerId: string;
   disabled: boolean;
-  onSetActive: (layerId: string) => Promise<void>;
-  onSetVisibility: (layerId: string, visible: boolean) => Promise<void>;
-  onRename: (layerId: string, name: string) => Promise<void>;
-  onReorder: (layerIds: string[]) => Promise<void>;
-  onDelete: (layerId: string) => Promise<void>;
+  onSetActive: (layerId: string) => Promise<boolean>;
+  onSetVisibility: (layerId: string, visible: boolean) => Promise<boolean>;
+  onRename: (layerId: string, name: string) => Promise<boolean>;
+  onReorder: (layerIds: string[]) => Promise<boolean>;
+  onDelete: (layerId: string) => Promise<boolean>;
 }
 
 export function LayerPanel({
@@ -26,15 +26,27 @@ export function LayerPanel({
 }: LayerPanelProps) {
   const [editingId, setEditingId] = useState<string>();
   const [draftName, setDraftName] = useState("");
+  const [actionPending, setActionPending] = useState(false);
+  const controlsDisabled = disabled || actionPending;
   const counts = new Map<string, number>();
   for (const feature of features) counts.set(feature.layerId, (counts.get(feature.layerId) ?? 0) + 1);
+
+  const runLayerAction = async (action: () => Promise<boolean>) => {
+    if (controlsDisabled) return false;
+    setActionPending(true);
+    try {
+      return await action();
+    } finally {
+      setActionPending(false);
+    }
+  };
 
   const move = (index: number, offset: -1 | 1) => {
     const next = [...layers];
     const target = index + offset;
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target], next[index]];
-    void onReorder(next.map(({ id }) => id));
+    void runLayerAction(() => onReorder(next.map(({ id }) => id)));
   };
 
   return (
@@ -53,15 +65,15 @@ export function LayerPanel({
                   name="active-layer"
                   aria-label={`Set ${layer.name} as active layer`}
                   checked={layer.id === activeLayerId}
-                  disabled={disabled}
-                  onChange={() => void onSetActive(layer.id)}
+                  disabled={controlsDisabled}
+                  onChange={() => void runLayerAction(() => onSetActive(layer.id))}
                 />
                 <input
                   type="checkbox"
                   aria-label={`Show ${layer.name}`}
                   checked={layer.visible}
-                  disabled={disabled}
-                  onChange={(event) => void onSetVisibility(layer.id, event.target.checked)}
+                  disabled={controlsDisabled}
+                  onChange={(event) => void runLayerAction(() => onSetVisibility(layer.id, event.target.checked))}
                 />
                 {editing ? (
                   <form
@@ -69,20 +81,23 @@ export function LayerPanel({
                       event.preventDefault();
                       const name = draftName.trim();
                       if (!name) return;
-                      void onRename(layer.id, name).then(() => setEditingId(undefined));
+                      void runLayerAction(() => onRename(layer.id, name)).then((saved) => {
+                        if (saved) setEditingId(undefined);
+                      });
                     }}
                   >
                     <input
                       aria-label="Layer name"
                       value={draftName}
                       autoFocus
+                      disabled={controlsDisabled}
                       onChange={(event) => setDraftName(event.target.value)}
                     />
                   </form>
                 ) : (
                   <button
                     className="layer-item__name"
-                    disabled={disabled}
+                    disabled={controlsDisabled}
                     onClick={() => {
                       setEditingId(layer.id);
                       setDraftName(layer.name);
@@ -96,27 +111,27 @@ export function LayerPanel({
               <div className="layer-item__actions">
                 <button
                   aria-label={`Move ${layer.name} up`}
-                  disabled={disabled || index === 0}
+                  disabled={controlsDisabled || index === 0}
                   onClick={() => move(index, -1)}
                 >
                   ↑
                 </button>
                 <button
                   aria-label={`Move ${layer.name} down`}
-                  disabled={disabled || index === layers.length - 1}
+                  disabled={controlsDisabled || index === layers.length - 1}
                   onClick={() => move(index, 1)}
                 >
                   ↓
                 </button>
                 <button
-                  disabled={disabled || layer.id === DEFAULT_LAYER_ID}
+                  disabled={controlsDisabled || layer.id === DEFAULT_LAYER_ID}
                   onClick={() => {
                     if (
                       window.confirm(
                         `Delete layer “${layer.name}” and its ${count} feature${count === 1 ? "" : "s"}? This cannot be undone.`
                       )
                     ) {
-                      void onDelete(layer.id);
+                      void runLayerAction(() => onDelete(layer.id));
                     }
                   }}
                 >

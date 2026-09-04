@@ -179,30 +179,28 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
   );
 
   const setActiveLayer = useCallback(
-    (layerId: string) => runRepositoryAction((repository) => repository.setActiveLayer(layerId)).then(() => undefined),
+    (layerId: string) => runRepositoryAction((repository) => repository.setActiveLayer(layerId)),
     [runRepositoryAction]
   );
 
   const setLayerVisibility = useCallback(
     (layerId: string, visible: boolean) =>
-      runRepositoryAction((repository) => repository.updateLayer(layerId, { visible })).then(() => undefined),
+      runRepositoryAction((repository) => repository.updateLayer(layerId, { visible })),
     [runRepositoryAction]
   );
 
   const renameLayer = useCallback(
-    (layerId: string, name: string) =>
-      runRepositoryAction((repository) => repository.updateLayer(layerId, { name })).then(() => undefined),
+    (layerId: string, name: string) => runRepositoryAction((repository) => repository.updateLayer(layerId, { name })),
     [runRepositoryAction]
   );
 
   const reorderLayers = useCallback(
-    (layerIds: string[]) =>
-      runRepositoryAction((repository) => repository.reorderLayers(layerIds)).then(() => undefined),
+    (layerIds: string[]) => runRepositoryAction((repository) => repository.reorderLayers(layerIds)),
     [runRepositoryAction]
   );
 
   const deleteLayer = useCallback(
-    (layerId: string) => runRepositoryAction((repository) => repository.deleteLayer(layerId)).then(() => undefined),
+    (layerId: string) => runRepositoryAction((repository) => repository.deleteLayer(layerId)),
     [runRepositoryAction]
   );
 
@@ -308,7 +306,7 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
           (layerOrder.get(left.layerId)?.index ?? Number.MAX_SAFE_INTEGER) -
           (layerOrder.get(right.layerId)?.index ?? Number.MAX_SAFE_INTEGER)
       )
-      .map(toRenderableStroke);
+      .map((feature) => toRenderableStroke(feature, layerOrder.get(feature.layerId)?.index));
   }, [features, layers]);
   const canExport = !loading && repositoryRef.current !== null;
 
