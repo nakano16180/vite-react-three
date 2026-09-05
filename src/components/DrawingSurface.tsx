@@ -16,9 +16,10 @@ interface DrawingSurfaceProps {
   color: string;
   width: number;
   enabled: boolean;
+  renderOrder: number;
 }
 
-export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfaceProps) {
+export function DrawingSurface({ onFinish, color, width, enabled, renderOrder }: DrawingSurfaceProps) {
   const { camera, size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
@@ -125,7 +126,16 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
   return (
     <group>
       {/* 確定済みの線分 */}
-      {enabled && currentPtsWorld.length >= 2 && <Line points={currentPtsWorld} color={color} lineWidth={width} />}
+      {enabled && currentPtsWorld.length >= 2 && (
+        <Line
+          points={currentPtsWorld}
+          color={color}
+          lineWidth={width}
+          renderOrder={renderOrder}
+          depthTest={false}
+          depthWrite={false}
+        />
+      )}
       {/* プレビュー線（半透明） */}
       {previewLine && (
         <Line
@@ -134,6 +144,9 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
           lineWidth={width}
           transparent
           opacity={0.4}
+          renderOrder={renderOrder}
+          depthTest={false}
+          depthWrite={false}
         />
       )}
       {hasPreviewTarget && hoverWorld && previewPtsPx.length >= 2 && (
@@ -163,9 +176,9 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
       )}
       {/* 最後の点のハイライト */}
       {enabled && lastPt && (
-        <mesh position={lastPt}>
+        <mesh position={lastPt} renderOrder={renderOrder}>
           <circleGeometry args={[dotRadius, 16]} />
-          <meshBasicMaterial color={color} />
+          <meshBasicMaterial color={color} depthTest={false} depthWrite={false} />
         </mesh>
       )}
       <mesh

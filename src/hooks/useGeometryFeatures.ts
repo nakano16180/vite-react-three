@@ -168,14 +168,17 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       const canonicalGeometry = simplifyOn
         ? simplifyFeatureGeometry(geometry, Math.max(0, Math.min(strokeWidth * 0.3, 3)))
         : simplifyFeatureGeometry(geometry, 0);
-      const feature = createGeometryFeature({
-        geometry: canonicalGeometry,
-        style: { strokeColor, strokeWidth },
-        layerId: activeLayerId,
+      await runRepositoryAction(async (repository) => {
+        const layerId = await repository.activeLayerId();
+        const feature = createGeometryFeature({
+          geometry: canonicalGeometry,
+          style: { strokeColor, strokeWidth },
+          layerId,
+        });
+        await repository.insertFeature(feature);
       });
-      await runRepositoryAction((repository) => repository.insertFeature(feature));
     },
-    [activeLayerId, runRepositoryAction, simplifyOn, strokeColor, strokeWidth]
+    [runRepositoryAction, simplifyOn, strokeColor, strokeWidth]
   );
 
   const setActiveLayer = useCallback(

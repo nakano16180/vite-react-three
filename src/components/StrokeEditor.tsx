@@ -124,7 +124,18 @@ export function StrokeEditor({ strokes, onUpdateStroke, enabled }: StrokeEditorP
           .map(([x, y]) => pxToWorld(x, y));
         if (points.length < 2) return null;
         const displayPoints = s.geomType === "polygon" ? [...points, points[0]] : points;
-        return <Line key={s.id} points={displayPoints} color={s.color} lineWidth={s.width} />;
+        const renderOrder = s.renderOrder ?? 0;
+        return (
+          <Line
+            key={s.id}
+            points={displayPoints}
+            color={s.color}
+            lineWidth={s.width}
+            renderOrder={renderOrder * 2 + 1}
+            depthTest={false}
+            depthWrite={false}
+          />
+        );
       })}
 
       {/* 各点のハンドル（外枠 + 塗り） */}
@@ -136,16 +147,16 @@ export function StrokeEditor({ strokes, onUpdateStroke, enabled }: StrokeEditorP
             const isSelected = selected?.strokeId === s.id && selected?.ptIndex === ptIndex;
             const r = isSelected ? dotRadius * 1.5 : dotRadius;
             return (
-              <group key={`${s.id}-${ptIndex}`} position={[wx, wy, 0.001]}>
+              <group key={`${s.id}-${ptIndex}`} position={[wx, wy, 0.001]} renderOrder={(s.renderOrder ?? 0) * 2 + 2}>
                 {/* 外枠 */}
                 <mesh>
                   <circleGeometry args={[r * 1.4, 16]} />
-                  <meshBasicMaterial color="#333333" />
+                  <meshBasicMaterial color="#333333" depthTest={false} depthWrite={false} />
                 </mesh>
                 {/* 塗り */}
                 <mesh position={[0, 0, 0.0001]}>
                   <circleGeometry args={[r, 16]} />
-                  <meshBasicMaterial color={isSelected ? "#ff9900" : "#ffffff"} />
+                  <meshBasicMaterial color={isSelected ? "#ff9900" : "#ffffff"} depthTest={false} depthWrite={false} />
                 </mesh>
               </group>
             );

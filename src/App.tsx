@@ -23,6 +23,7 @@ interface WorkspaceProps {
   strokeWidth: number;
   strokes: RenderableStroke[];
   temporaryStrokes: RenderableStroke[];
+  drawingRenderOrder: number;
   onFinishStroke: ReturnType<typeof useGeometryFeatures>["persistStroke"];
   onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
 }
@@ -36,6 +37,7 @@ function Workspace({
   strokeWidth,
   strokes,
   temporaryStrokes,
+  drawingRenderOrder,
   onFinishStroke,
   onUpdateStroke,
 }: WorkspaceProps) {
@@ -64,6 +66,7 @@ function Workspace({
               color={strokeColor}
               width={strokeWidth}
               enabled={interactionMode === "draw"}
+              renderOrder={drawingRenderOrder}
             />
           </Canvas>
         </div>
@@ -208,6 +211,7 @@ export default function App() {
           strokeWidth={strokeWidth}
           strokes={strokes}
           temporaryStrokes={query.temporaryStrokes}
+          drawingRenderOrder={(layers.length + 2) * 2}
           onFinishStroke={persistStroke}
           onUpdateStroke={updateStroke}
         />
