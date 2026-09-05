@@ -425,6 +425,7 @@ export class GeometryRepository {
     try {
       await this.connection.query(`DELETE FROM ${table};`);
       await this.connection.query(`DELETE FROM layers WHERE id <> '${DEFAULT_LAYER_ID}';`);
+      await this.revealDefaultLayer();
       await this.setMetadata("active_layer_id", DEFAULT_LAYER_ID);
       await this.connection.query("COMMIT;");
     } catch (error) {
@@ -532,6 +533,7 @@ export class GeometryRepository {
         await deleteFeatures.query(layerId);
         await deleteLayer.query(layerId);
         if ((await this.metadataValue("active_layer_id")) === layerId) {
+          await this.revealDefaultLayer();
           await this.setMetadata("active_layer_id", DEFAULT_LAYER_ID);
         }
       } finally {
@@ -649,6 +651,10 @@ export class GeometryRepository {
     } finally {
       await statement.close();
     }
+  }
+
+  private async revealDefaultLayer(): Promise<void> {
+    await this.connection.query(`UPDATE layers SET visible = TRUE WHERE id = '${DEFAULT_LAYER_ID}';`);
   }
 
   private async assertFeatureLayerExists(id: string): Promise<void> {

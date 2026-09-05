@@ -68,6 +68,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
                   color={s.color}
                   lineWidth={s.width}
                   renderOrder={s.renderOrder * 2 + 1}
+                  transparent
                   depthTest={false}
                   depthWrite={false}
                 />

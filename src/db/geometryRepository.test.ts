@@ -930,6 +930,7 @@ describe("transactional clear", () => {
       "BEGIN TRANSACTION;",
       `DELETE FROM ${store === "spatial" ? "features" : "features_json"};`,
       `DELETE FROM layers WHERE id <> '${DEFAULT_LAYER_ID}';`,
+      `UPDATE layers SET visible = TRUE WHERE id = '${DEFAULT_LAYER_ID}';`,
       "COMMIT;",
     ]);
     expect(prepare).toHaveBeenCalledWith(
@@ -954,6 +955,83 @@ describe("transactional clear", () => {
     expect(query).toHaveBeenCalledWith("ROLLBACK;");
     expect(query).not.toHaveBeenCalledWith("COMMIT;");
   });
+
+  it.each(["spatial", "json"] as const)(
+    "%s active custom layer削除はDefaultをvisibleに戻してactiveを切り替える",
+    async (store) => {
+      const executionLog: string[] = [];
+      const query = vi.fn(async (sql: string) => {
+        executionLog.push(sql);
+        return result();
+      });
+      const prepare = vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          executionLog.push(sql);
+          if (sql.startsWith("SELECT value") && args[0] === "active_layer_id") {
+            return result([{ value: "custom" }]);
+          }
+          return result();
+        }),
+        close: vi.fn(),
+      }));
+      const repository = new GeometryRepository({ query, prepare } as unknown as AsyncDuckDBConnection, {
+        opfs: false,
+        spatial: store === "spatial",
+        store,
+      });
+
+      await repository.deleteLayer("custom");
+
+      const mutationLog = executionLog.filter(
+        (sql) =>
+          sql === "BEGIN TRANSACTION;" ||
+          sql.startsWith("DELETE FROM") ||
+          sql.startsWith("UPDATE layers SET visible") ||
+          sql.startsWith("INSERT INTO app_metadata") ||
+          sql === "COMMIT;"
+      );
+      expect(mutationLog).toEqual([
+        "BEGIN TRANSACTION;",
+        `DELETE FROM ${store === "spatial" ? "features" : "features_json"} WHERE layer_id = ?;`,
+        "DELETE FROM layers WHERE id = ?;",
+        `UPDATE layers SET visible = TRUE WHERE id = '${DEFAULT_LAYER_ID}';`,
+        "INSERT INTO app_metadata(key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value;",
+        "COMMIT;",
+      ]);
+    }
+  );
+
+  it.each(["spatial", "json"] as const)(
+    "%s active custom layer削除でDefault可視化に失敗したらrollbackする",
+    async (store) => {
+      const executionLog: string[] = [];
+      const query = vi.fn(async (sql: string) => {
+        executionLog.push(sql);
+        if (sql.startsWith("UPDATE layers SET visible")) throw new Error("default layer reveal failed");
+        return result();
+      });
+      const prepare = vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          executionLog.push(sql);
+          if (sql.startsWith("SELECT value") && args[0] === "active_layer_id") {
+            return result([{ value: "custom" }]);
+          }
+          return result();
+        }),
+        close: vi.fn(),
+      }));
+      const repository = new GeometryRepository({ query, prepare } as unknown as AsyncDuckDBConnection, {
+        opfs: false,
+        spatial: store === "spatial",
+        store,
+      });
+
+      await expect(repository.deleteLayer("custom")).rejects.toThrow("default layer reveal failed");
+
+      expect(executionLog.at(-1)).toBe("ROLLBACK;");
+      expect(executionLog).not.toContain("COMMIT;");
+    }
+  );
 });
 
 describe("layer invariant", () => {
