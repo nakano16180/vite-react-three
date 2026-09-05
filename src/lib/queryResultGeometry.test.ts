@@ -16,7 +16,8 @@ describe("query result geometry", () => {
       result([
         '{"type":"LineString","coordinates":[[0,0],[2,2]]}',
         '{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,0]]]}',
-      ])
+      ]),
+      4
     );
     expect(strokes.map(({ geomType, ptsPx }) => ({ geomType, ptsPx }))).toEqual([
       {
@@ -35,6 +36,7 @@ describe("query result geometry", () => {
         ],
       },
     ]);
+    expect(strokes.every(({ renderOrder }) => renderOrder === 4)).toBe(true);
   });
 
   it("NULL、invalid、unsupported geometryをskipしrows自体は変更しない", () => {

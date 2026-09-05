@@ -306,7 +306,10 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
           (layerOrder.get(left.layerId)?.index ?? Number.MAX_SAFE_INTEGER) -
           (layerOrder.get(right.layerId)?.index ?? Number.MAX_SAFE_INTEGER)
       )
-      .map((feature) => toRenderableStroke(feature, layerOrder.get(feature.layerId)?.index));
+      .map((feature) => {
+        const index = layerOrder.get(feature.layerId)?.index;
+        return toRenderableStroke(feature, index === undefined ? undefined : layers.length - index);
+      });
   }, [features, layers]);
   const canExport = !loading && repositoryRef.current !== null;
 

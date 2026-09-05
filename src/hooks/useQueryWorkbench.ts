@@ -76,7 +76,7 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
       const next = await runtime.execute(sql);
       if (request !== requestRef.current || !next) return;
       setResult(next);
-      setTemporaryStrokes(queryResultStrokes(next));
+      setTemporaryStrokes(queryResultStrokes(next, layers.length + 1));
       setStatus(next.status);
     } catch (cause) {
       if (request !== requestRef.current) return;
@@ -84,7 +84,7 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
       setStatus("error");
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [sql]);
+  }, [layers.length, sql]);
 
   const cancel = useCallback(async () => {
     requestRef.current += 1;
