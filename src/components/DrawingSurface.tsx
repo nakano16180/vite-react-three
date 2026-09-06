@@ -10,16 +10,17 @@ import {
   type Point2D,
 } from "../lib/geometry";
 import { pointerToModelPixel } from "../lib/canvasCoordinates";
+import { drawingOverlayOrder, transparentGeometryMaterial } from "../lib/renderOrder";
 
 interface DrawingSurfaceProps {
   onFinish: (ptsPx: Point2D[], type: "line" | "polygon") => void | Promise<void>;
   color: string;
   width: number;
   enabled: boolean;
-  renderOrder: number;
+  drawingRank: number;
 }
 
-export function DrawingSurface({ onFinish, color, width, enabled, renderOrder }: DrawingSurfaceProps) {
+export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }: DrawingSurfaceProps) {
   const { camera, size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
@@ -131,9 +132,8 @@ export function DrawingSurface({ onFinish, color, width, enabled, renderOrder }:
           points={currentPtsWorld}
           color={color}
           lineWidth={width}
-          renderOrder={renderOrder}
-          depthTest={false}
-          depthWrite={false}
+          renderOrder={drawingOverlayOrder(drawingRank, "outline")}
+          {...transparentGeometryMaterial}
         />
       )}
       {/* プレビュー線（半透明） */}
@@ -142,11 +142,9 @@ export function DrawingSurface({ onFinish, color, width, enabled, renderOrder }:
           points={previewLine as [number, number, number][]}
           color={color}
           lineWidth={width}
-          transparent
           opacity={0.4}
-          renderOrder={renderOrder}
-          depthTest={false}
-          depthWrite={false}
+          renderOrder={drawingOverlayOrder(drawingRank, "outline")}
+          {...transparentGeometryMaterial}
         />
       )}
       {hasPreviewTarget && hoverWorld && previewPtsPx.length >= 2 && (
@@ -176,9 +174,9 @@ export function DrawingSurface({ onFinish, color, width, enabled, renderOrder }:
       )}
       {/* 最後の点のハイライト */}
       {enabled && lastPt && (
-        <mesh position={lastPt} renderOrder={renderOrder}>
+        <mesh position={lastPt} renderOrder={drawingOverlayOrder(drawingRank, "handle")}>
           <circleGeometry args={[dotRadius, 16]} />
-          <meshBasicMaterial color={color} depthTest={false} depthWrite={false} />
+          <meshBasicMaterial color={color} {...transparentGeometryMaterial} />
         </mesh>
       )}
       <mesh

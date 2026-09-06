@@ -72,7 +72,7 @@ export function LayerPanel({
                   type="checkbox"
                   aria-label={`Show ${layer.name}`}
                   checked={layer.visible}
-                  disabled={controlsDisabled}
+                  disabled={controlsDisabled || layer.id === activeLayerId}
                   onChange={(event) => void runLayerAction(() => onSetVisibility(layer.id, event.target.checked))}
                 />
                 {editing ? (

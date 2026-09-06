@@ -4,6 +4,7 @@ import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
 import type { RenderableStroke } from "../domain/renderableStroke";
 import { getCentroid } from "../lib/geometry";
+import { renderOrderFor, transparentGeometryMaterial } from "../lib/renderOrder";
 
 interface SceneProps {
   strokes: RenderableStroke[];
@@ -51,15 +52,13 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
             {!s.isRenderable ? null : (
               <>
                 {s.shape && (
-                  <mesh position={[0, 0, -0.001]} renderOrder={s.renderOrder * 2}>
+                  <mesh position={[0, 0, -0.001]} renderOrder={renderOrderFor(s.renderOrder, "fill")}>
                     <shapeGeometry args={[s.shape]} />
                     <meshBasicMaterial
                       color={s.color}
-                      transparent
+                      {...transparentGeometryMaterial}
                       opacity={0.25}
                       side={THREE.DoubleSide}
-                      depthTest={false}
-                      depthWrite={false}
                     />
                   </mesh>
                 )}
@@ -67,10 +66,8 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
                   points={s.points}
                   color={s.color}
                   lineWidth={s.width}
-                  renderOrder={s.renderOrder * 2 + 1}
-                  transparent
-                  depthTest={false}
-                  depthWrite={false}
+                  renderOrder={renderOrderFor(s.renderOrder, "outline")}
+                  {...transparentGeometryMaterial}
                 />
                 {showMeasurements && s.measurementPosition && (
                   <Html position={s.measurementPosition} center style={{ pointerEvents: "none" }}>

@@ -11,6 +11,7 @@ import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
 import { useQueryWorkbench } from "./hooks/useQueryWorkbench";
+import { drawingRenderRank } from "./lib/renderOrder";
 
 type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
@@ -23,7 +24,7 @@ interface WorkspaceProps {
   strokeWidth: number;
   strokes: RenderableStroke[];
   temporaryStrokes: RenderableStroke[];
-  drawingRenderOrder: number;
+  drawingRank: number;
   onFinishStroke: ReturnType<typeof useGeometryFeatures>["persistStroke"];
   onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
 }
@@ -37,7 +38,7 @@ function Workspace({
   strokeWidth,
   strokes,
   temporaryStrokes,
-  drawingRenderOrder,
+  drawingRank,
   onFinishStroke,
   onUpdateStroke,
 }: WorkspaceProps) {
@@ -66,7 +67,7 @@ function Workspace({
               color={strokeColor}
               width={strokeWidth}
               enabled={interactionMode === "draw"}
-              renderOrder={drawingRenderOrder}
+              drawingRank={drawingRank}
             />
           </Canvas>
         </div>
@@ -211,7 +212,7 @@ export default function App() {
           strokeWidth={strokeWidth}
           strokes={strokes}
           temporaryStrokes={query.temporaryStrokes}
-          drawingRenderOrder={(layers.length + 2) * 2}
+          drawingRank={drawingRenderRank(layers.length)}
           onFinishStroke={persistStroke}
           onUpdateStroke={updateStroke}
         />

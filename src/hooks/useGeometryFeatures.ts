@@ -16,6 +16,7 @@ import { createPromiseQueue } from "../lib/promiseQueue";
 import type { QueryResult } from "../db/queryRuntime";
 import { queryResultFeatures } from "../lib/queryResultGeometry";
 import { createId } from "../lib/id";
+import { layerRenderRank } from "../lib/renderOrder";
 
 export type GeometryType = "line" | "polygon";
 
@@ -311,7 +312,7 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
       )
       .map((feature) => {
         const index = layerOrder.get(feature.layerId)?.index;
-        return toRenderableStroke(feature, index === undefined ? undefined : layers.length - index);
+        return toRenderableStroke(feature, index === undefined ? undefined : layerRenderRank(index, layers.length));
       });
   }, [features, layers]);
   const canExport = !loading && repositoryRef.current !== null;

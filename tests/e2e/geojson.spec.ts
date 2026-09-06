@@ -112,19 +112,25 @@ test("layer panelのactive・visibility・order・rename・deleteを永続化す
 
   await page.getByRole("radio", { name: "Set Roads as active layer" }).click();
   await expect(page.getByRole("radio", { name: "Set Roads as active layer" })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Show Roads" })).toBeDisabled();
   await page.getByRole("button", { name: "Roads", exact: true }).click();
   await page.getByRole("textbox", { name: "Layer name" }).fill("Transport");
   await page.getByRole("textbox", { name: "Layer name" }).press("Enter");
   await expect(page.getByRole("button", { name: "Transport", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Move Transport up" }).click();
   await expect(page.locator(".layer-item__name").first()).toHaveText("Transport");
+  await page.getByRole("radio", { name: "Set Default as active layer" }).click();
+  await expect(page.getByRole("radio", { name: "Set Default as active layer" })).toBeChecked();
   await page.getByRole("checkbox", { name: "Show Transport" }).click();
   await expect(page.getByRole("checkbox", { name: "Show Transport" })).not.toBeChecked();
+  await page.getByRole("radio", { name: "Set Transport as active layer" }).click();
+  await expect(page.getByRole("radio", { name: "Set Transport as active layer" })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Show Transport" })).toBeChecked();
 
   await page.reload();
   await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
   await expect(page.getByRole("radio", { name: "Set Transport as active layer" })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: "Show Transport" })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Show Transport" })).toBeChecked();
   const layerNames = page.locator(".layer-item__name");
   await expect(layerNames.first()).toHaveText("Transport");
 
@@ -146,5 +152,6 @@ test("layer panelのactive・visibility・order・rename・deleteを永続化す
     .click();
   await expect(page.getByRole("button", { name: "Transport", exact: true })).toHaveCount(0);
   await expect(page.getByRole("radio", { name: "Set Default as active layer" })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Show Default" })).toBeChecked();
   expect((await exportGeoJSON(page)).features).toHaveLength(0);
 });

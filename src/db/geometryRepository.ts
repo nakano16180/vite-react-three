@@ -217,6 +217,7 @@ export class GeometryRepository {
     let replacedCreatedAtValues = 0;
     const diagnostics: string[] = [];
     try {
+      await this.normalizeActiveLayer();
       const migrated = (await this.metadataValue("legacy_strokes_migrated")) === "true";
       if (!migrated) {
         const tables = await this.legacyTables();
@@ -467,29 +468,73 @@ export class GeometryRepository {
   }
 
   async setActiveLayer(layerId: string): Promise<void> {
-    await this.assertLayerExists(layerId);
-    await this.setMetadata("active_layer_id", layerId);
+    // The existence check, reveal, and metadata write share one DuckDB
+    // transaction. The UI queue serializes this repository's operations; a
+    // second connection is still governed by DuckDB's optimistic commit
+    // conflict handling rather than an application-wide mutex.
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      await this.assertLayerExists(layerId);
+      // Active layers are always visible. Reveal and activate in one transaction
+      // so a reload cannot observe an active-but-hidden layer.
+      const reveal = await this.connection.prepare("UPDATE layers SET visible = TRUE WHERE id = ?;");
+      try {
+        await reveal.query(layerId);
+      } finally {
+        await reveal.close();
+      }
+      await this.setMetadata("active_layer_id", layerId);
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the activation failure; rollback is best-effort.
+      }
+      throw error;
+    }
     await this.checkpoint();
   }
 
   async updateLayer(layerId: string, changes: { name?: string; visible?: boolean }): Promise<void> {
-    if (changes.name !== undefined) {
-      const name = changes.name.trim();
-      if (!name) throw new Error("Layer name cannot be empty");
-      const statement = await this.connection.prepare("UPDATE layers SET name = ? WHERE id = ?;");
-      try {
-        await statement.query(name, layerId);
-      } finally {
-        await statement.close();
+    if (changes.name === undefined && changes.visible === undefined) return;
+
+    // Keep the active-layer check and the corresponding mutation in the same
+    // transaction. Separate connections can still race at commit; DuckDB may
+    // reject an overlapping write, but it does not provide a process-wide UI
+    // mutex for this browser app.
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      await this.assertLayerExists(layerId);
+      if (changes.visible === false && (await this.activeLayerId()) === layerId) {
+        throw new Error("The active layer cannot be hidden");
       }
-    }
-    if (changes.visible !== undefined) {
-      const statement = await this.connection.prepare("UPDATE layers SET visible = ? WHERE id = ?;");
-      try {
-        await statement.query(changes.visible, layerId);
-      } finally {
-        await statement.close();
+      if (changes.name !== undefined) {
+        const name = changes.name.trim();
+        if (!name) throw new Error("Layer name cannot be empty");
+        const statement = await this.connection.prepare("UPDATE layers SET name = ? WHERE id = ?;");
+        try {
+          await statement.query(name, layerId);
+        } finally {
+          await statement.close();
+        }
       }
+      if (changes.visible !== undefined) {
+        const statement = await this.connection.prepare("UPDATE layers SET visible = ? WHERE id = ?;");
+        try {
+          await statement.query(changes.visible, layerId);
+        } finally {
+          await statement.close();
+        }
+      }
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the layer update failure; rollback is best-effort.
+      }
+      throw error;
     }
     await this.checkpoint();
   }
@@ -640,6 +685,31 @@ export class GeometryRepository {
         `Active feature store mismatch: database uses ${stored}, but runtime selected ${this.capabilities.store}.`
       );
     }
+  }
+
+  /** Repair old databases that persisted an invalid or hidden active layer. */
+  private async normalizeActiveLayer(): Promise<void> {
+    const stored = await this.metadataValue("active_layer_id");
+    const candidate = stored || DEFAULT_LAYER_ID;
+    const statement = await this.connection.prepare("SELECT id, visible FROM layers WHERE id = ? LIMIT 1;");
+    let row: Row | undefined;
+    try {
+      const rows = (await statement.query(candidate)).toArray();
+      row = rows[0]?.toJSON() as Row | undefined;
+    } finally {
+      await statement.close();
+    }
+
+    const activeLayerId = row ? candidate : DEFAULT_LAYER_ID;
+    if (!row || row.visible !== true) {
+      const reveal = await this.connection.prepare("UPDATE layers SET visible = TRUE WHERE id = ?;");
+      try {
+        await reveal.query(activeLayerId);
+      } finally {
+        await reveal.close();
+      }
+    }
+    if (stored !== activeLayerId) await this.setMetadata("active_layer_id", activeLayerId);
   }
 
   private async assertLayerExists(layerId: string): Promise<void> {

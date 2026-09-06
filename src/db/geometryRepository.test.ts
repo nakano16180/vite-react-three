@@ -386,6 +386,40 @@ describe("OPFS durability", () => {
 });
 
 describe("schema metadata", () => {
+  it("初期化時にhidden active layerをvisibleへ正規化する", async () => {
+    const metadata = new Map<string, string>([
+      ["schema_version", String(CURRENT_SCHEMA_VERSION)],
+      ["active_feature_store", "json"],
+      ["active_layer_id", "custom"],
+      ["legacy_strokes_migrated", "true"],
+    ]);
+    const layerUpdates: string[] = [];
+    const connection = {
+      query: vi.fn().mockResolvedValue(result()),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async (...args: unknown[]) => {
+          if (sql.startsWith("SELECT value")) {
+            const value = metadata.get(String(args[0]));
+            return result(value === undefined ? [] : [{ value }]);
+          }
+          if (sql.startsWith("SELECT id, visible")) return result([{ id: "custom", visible: false }]);
+          if (sql.startsWith("UPDATE layers SET visible")) {
+            layerUpdates.push(String(args[0]));
+            return result();
+          }
+          if (sql.startsWith("INSERT INTO app_metadata")) metadata.set(String(args[0]), String(args[1]));
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+
+    await new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" }).initialize();
+
+    expect(layerUpdates).toEqual(["custom"]);
+    expect(metadata.get("active_layer_id")).toBe("custom");
+  });
+
   it("未設定schema versionを現versionへ初期化する", async () => {
     const metadata = new Map<string, string>();
     const connection = {
@@ -1035,6 +1069,99 @@ describe("transactional clear", () => {
 });
 
 describe("layer invariant", () => {
+  it("active layerの非表示更新はmutation前にrejectする", async () => {
+    const metadataQuery = vi.fn(async (key: string) =>
+      key === "active_layer_id" ? result([{ value: "active" }]) : result()
+    );
+    const connection = {
+      query: vi.fn().mockResolvedValue(result()),
+      prepare: vi.fn(async (sql: string) => ({
+        query: sql.startsWith("SELECT value") ? metadataQuery : vi.fn().mockResolvedValue(result([{ present: 1 }])),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" });
+
+    await expect(repository.updateLayer("active", { visible: false })).rejects.toThrow(
+      "The active layer cannot be hidden"
+    );
+    expect(connection.query).toHaveBeenNthCalledWith(1, "BEGIN TRANSACTION;");
+    expect(connection.query).toHaveBeenCalledWith("ROLLBACK;");
+  });
+
+  it("存在しないlayerの更新は0行UPDATEを成功扱いせずrollbackする", async () => {
+    const query = vi.fn().mockResolvedValue(result());
+    const connection = {
+      query,
+      prepare: vi.fn(async (sql: string) => ({
+        query: sql.startsWith("SELECT 1 AS present")
+          ? vi.fn().mockResolvedValue(result())
+          : vi.fn().mockResolvedValue(result()),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" });
+
+    await expect(repository.updateLayer("missing", { name: "Renamed" })).rejects.toThrow(
+      'Layer "missing" does not exist'
+    );
+    expect(query).toHaveBeenNthCalledWith(1, "BEGIN TRANSACTION;");
+    expect(query).toHaveBeenCalledWith("ROLLBACK;");
+  });
+
+  it("hidden layerをactive化するとrevealとmetadataを同一transactionでcommitする", async () => {
+    const execution: string[] = [];
+    const connection = {
+      query: vi.fn(async (sql: string) => {
+        execution.push(sql);
+        return result();
+      }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async () => {
+          execution.push(sql);
+          if (sql.startsWith("SELECT 1 AS present")) return result([{ present: 1 }]);
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" });
+
+    await repository.setActiveLayer("hidden");
+
+    expect(execution).toEqual([
+      "BEGIN TRANSACTION;",
+      "SELECT 1 AS present FROM layers WHERE id = ? LIMIT 1;",
+      "UPDATE layers SET visible = TRUE WHERE id = ?;",
+      "INSERT INTO app_metadata(key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value;",
+      "COMMIT;",
+    ]);
+  });
+
+  it("active化途中のfailureはrollbackしmetadataをcommitしない", async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql === "BEGIN TRANSACTION;") return result();
+      if (sql === "ROLLBACK;") return result();
+      return result();
+    });
+    const connection = {
+      query,
+      prepare: vi.fn(async (sql: string) => ({
+        query: vi.fn(async () => {
+          if (sql.startsWith("SELECT 1 AS present")) return result([{ present: 1 }]);
+          if (sql.startsWith("UPDATE layers")) throw new Error("reveal failed");
+          return result();
+        }),
+        close: vi.fn(),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, { opfs: false, spatial: false, store: "json" });
+
+    await expect(repository.setActiveLayer("hidden")).rejects.toThrow("reveal failed");
+    expect(query).toHaveBeenCalledWith("ROLLBACK;");
+    expect(query).not.toHaveBeenCalledWith("COMMIT;");
+  });
+
   it.each(["spatial", "json"] as const)("%s insertは存在しないlayerをrejectする", async (store) => {
     const connection = {
       prepare: vi.fn(async () => ({
