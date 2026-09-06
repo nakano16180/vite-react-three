@@ -3,6 +3,7 @@ import { createQueryRuntime, type QueryResult, type QueryRuntime } from "../db/q
 import type { GeometryFeature, Layer } from "../domain/geometryFeature";
 import type { RenderableStroke } from "../domain/renderableStroke";
 import { queryResultStrokes } from "../lib/queryResultGeometry";
+import { queryRenderRank } from "../lib/renderOrder";
 
 export type QueryUiStatus = "initializing" | "ready" | "running" | "cancelled" | "empty" | "success" | "error";
 
@@ -76,7 +77,7 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
       const next = await runtime.execute(sql);
       if (request !== requestRef.current || !next) return;
       setResult(next);
-      setTemporaryStrokes(queryResultStrokes(next));
+      setTemporaryStrokes(queryResultStrokes(next, queryRenderRank(layers.length)));
       setStatus(next.status);
     } catch (cause) {
       if (request !== requestRef.current) return;
@@ -84,7 +85,7 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
       setStatus("error");
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [sql]);
+  }, [layers.length, sql]);
 
   const cancel = useCallback(async () => {
     requestRef.current += 1;

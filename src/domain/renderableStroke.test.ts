@@ -16,7 +16,8 @@ describe("toRenderableStroke", () => {
           ],
         },
         style: { strokeColor: "#ff0000", strokeWidth: 2 },
-      })
+      }),
+      3
     );
 
     expect(stroke).toMatchObject({
@@ -24,6 +25,7 @@ describe("toRenderableStroke", () => {
       color: "#ff0000",
       width: 2,
       geomType: "polygon",
+      renderOrder: 3,
       area: 6,
       perimeter: 12,
     });

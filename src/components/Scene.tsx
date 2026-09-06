@@ -4,6 +4,7 @@ import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
 import type { RenderableStroke } from "../domain/renderableStroke";
 import { getCentroid } from "../lib/geometry";
+import { renderOrderFor, transparentGeometryMaterial } from "../lib/renderOrder";
 
 interface SceneProps {
   strokes: RenderableStroke[];
@@ -22,6 +23,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
     };
 
     return strokes.map((s) => {
+      const renderOrder = s.renderOrder ?? 0;
       const ptsPx = s.ptsPx.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
       const points = ptsPx.map(([x, y]) => pxToWorld(x, y));
       const isRenderable = points.length >= 2;
@@ -33,6 +35,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
         : points[points.length - 1];
       return {
         ...s,
+        renderOrder,
         isRenderable,
         points: isPolygon ? [...points, points[0]] : points,
         shape,
@@ -49,12 +52,23 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
             {!s.isRenderable ? null : (
               <>
                 {s.shape && (
-                  <mesh position={[0, 0, -0.001]}>
+                  <mesh position={[0, 0, -0.001]} renderOrder={renderOrderFor(s.renderOrder, "fill")}>
                     <shapeGeometry args={[s.shape]} />
-                    <meshBasicMaterial color={s.color} transparent opacity={0.25} side={THREE.DoubleSide} />
+                    <meshBasicMaterial
+                      color={s.color}
+                      {...transparentGeometryMaterial}
+                      opacity={0.25}
+                      side={THREE.DoubleSide}
+                    />
                   </mesh>
                 )}
-                <Line points={s.points} color={s.color} lineWidth={s.width} />
+                <Line
+                  points={s.points}
+                  color={s.color}
+                  lineWidth={s.width}
+                  renderOrder={renderOrderFor(s.renderOrder, "outline")}
+                  {...transparentGeometryMaterial}
+                />
                 {showMeasurements && s.measurementPosition && (
                   <Html position={s.measurementPosition} center style={{ pointerEvents: "none" }}>
                     <div

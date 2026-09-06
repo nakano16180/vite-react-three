@@ -217,6 +217,7 @@ export class GeometryRepository {
     let replacedCreatedAtValues = 0;
     const diagnostics: string[] = [];
     try {
+      await this.normalizeActiveLayer();
       const migrated = (await this.metadataValue("legacy_strokes_migrated")) === "true";
       if (!migrated) {
         const tables = await this.legacyTables();
@@ -425,6 +426,8 @@ export class GeometryRepository {
     try {
       await this.connection.query(`DELETE FROM ${table};`);
       await this.connection.query(`DELETE FROM layers WHERE id <> '${DEFAULT_LAYER_ID}';`);
+      await this.revealDefaultLayer();
+      await this.setMetadata("active_layer_id", DEFAULT_LAYER_ID);
       await this.connection.query("COMMIT;");
     } catch (error) {
       try {
@@ -451,6 +454,147 @@ export class GeometryRepository {
         createdAt: isoTimestamp(value.created_at),
       };
     });
+  }
+
+  async activeLayerId(): Promise<string> {
+    const stored = await this.metadataValue("active_layer_id");
+    if (!stored) return DEFAULT_LAYER_ID;
+    const statement = await this.connection.prepare("SELECT 1 AS present FROM layers WHERE id = ? LIMIT 1;");
+    try {
+      return (await statement.query(stored)).toArray().length > 0 ? stored : DEFAULT_LAYER_ID;
+    } finally {
+      await statement.close();
+    }
+  }
+
+  async setActiveLayer(layerId: string): Promise<void> {
+    // The existence check, reveal, and metadata write share one DuckDB
+    // transaction. The UI queue serializes this repository's operations; a
+    // second connection is still governed by DuckDB's optimistic commit
+    // conflict handling rather than an application-wide mutex.
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      await this.assertLayerExists(layerId);
+      // Active layers are always visible. Reveal and activate in one transaction
+      // so a reload cannot observe an active-but-hidden layer.
+      const reveal = await this.connection.prepare("UPDATE layers SET visible = TRUE WHERE id = ?;");
+      try {
+        await reveal.query(layerId);
+      } finally {
+        await reveal.close();
+      }
+      await this.setMetadata("active_layer_id", layerId);
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the activation failure; rollback is best-effort.
+      }
+      throw error;
+    }
+    await this.checkpoint();
+  }
+
+  async updateLayer(layerId: string, changes: { name?: string; visible?: boolean }): Promise<void> {
+    if (changes.name === undefined && changes.visible === undefined) return;
+
+    // Keep the active-layer check and the corresponding mutation in the same
+    // transaction. Separate connections can still race at commit; DuckDB may
+    // reject an overlapping write, but it does not provide a process-wide UI
+    // mutex for this browser app.
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      await this.assertLayerExists(layerId);
+      if (changes.visible === false && (await this.activeLayerId()) === layerId) {
+        throw new Error("The active layer cannot be hidden");
+      }
+      if (changes.name !== undefined) {
+        const name = changes.name.trim();
+        if (!name) throw new Error("Layer name cannot be empty");
+        const statement = await this.connection.prepare("UPDATE layers SET name = ? WHERE id = ?;");
+        try {
+          await statement.query(name, layerId);
+        } finally {
+          await statement.close();
+        }
+      }
+      if (changes.visible !== undefined) {
+        const statement = await this.connection.prepare("UPDATE layers SET visible = ? WHERE id = ?;");
+        try {
+          await statement.query(changes.visible, layerId);
+        } finally {
+          await statement.close();
+        }
+      }
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the layer update failure; rollback is best-effort.
+      }
+      throw error;
+    }
+    await this.checkpoint();
+  }
+
+  async reorderLayers(layerIds: string[]): Promise<void> {
+    const existing = await this.listLayers();
+    if (layerIds.length !== existing.length || new Set(layerIds).size !== layerIds.length) {
+      throw new Error("Layer order must contain every layer exactly once");
+    }
+    const existingIds = new Set(existing.map(({ id }) => id));
+    if (layerIds.some((id) => !existingIds.has(id))) throw new Error("Layer order contains an unknown layer");
+
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      const statement = await this.connection.prepare("UPDATE layers SET sort_order = ? WHERE id = ?;");
+      try {
+        for (const [order, id] of layerIds.entries()) await statement.query(order, id);
+      } finally {
+        await statement.close();
+      }
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the ordering failure; rollback is best-effort.
+      }
+      throw error;
+    }
+    await this.checkpoint();
+  }
+
+  async deleteLayer(layerId: string): Promise<void> {
+    if (layerId === DEFAULT_LAYER_ID) throw new Error("The Default layer cannot be deleted");
+    const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+    await this.connection.query("BEGIN TRANSACTION;");
+    try {
+      const deleteFeatures = await this.connection.prepare(`DELETE FROM ${table} WHERE layer_id = ?;`);
+      const deleteLayer = await this.connection.prepare("DELETE FROM layers WHERE id = ?;");
+      try {
+        await deleteFeatures.query(layerId);
+        await deleteLayer.query(layerId);
+        if ((await this.metadataValue("active_layer_id")) === layerId) {
+          await this.revealDefaultLayer();
+          await this.setMetadata("active_layer_id", DEFAULT_LAYER_ID);
+        }
+      } finally {
+        await deleteFeatures.close();
+        await deleteLayer.close();
+      }
+      await this.connection.query("COMMIT;");
+    } catch (error) {
+      try {
+        await this.connection.query("ROLLBACK;");
+      } catch {
+        // Preserve the deletion failure; rollback is best-effort.
+      }
+      throw error;
+    }
+    await this.checkpoint();
   }
 
   async insertLayers(layers: Layer[], deferCheckpoint = false): Promise<void> {
@@ -543,6 +687,31 @@ export class GeometryRepository {
     }
   }
 
+  /** Repair old databases that persisted an invalid or hidden active layer. */
+  private async normalizeActiveLayer(): Promise<void> {
+    const stored = await this.metadataValue("active_layer_id");
+    const candidate = stored || DEFAULT_LAYER_ID;
+    const statement = await this.connection.prepare("SELECT id, visible FROM layers WHERE id = ? LIMIT 1;");
+    let row: Row | undefined;
+    try {
+      const rows = (await statement.query(candidate)).toArray();
+      row = rows[0]?.toJSON() as Row | undefined;
+    } finally {
+      await statement.close();
+    }
+
+    const activeLayerId = row ? candidate : DEFAULT_LAYER_ID;
+    if (!row || row.visible !== true) {
+      const reveal = await this.connection.prepare("UPDATE layers SET visible = TRUE WHERE id = ?;");
+      try {
+        await reveal.query(activeLayerId);
+      } finally {
+        await reveal.close();
+      }
+    }
+    if (stored !== activeLayerId) await this.setMetadata("active_layer_id", activeLayerId);
+  }
+
   private async assertLayerExists(layerId: string): Promise<void> {
     const statement = await this.connection.prepare("SELECT 1 AS present FROM layers WHERE id = ? LIMIT 1;");
     try {
@@ -552,6 +721,10 @@ export class GeometryRepository {
     } finally {
       await statement.close();
     }
+  }
+
+  private async revealDefaultLayer(): Promise<void> {
+    await this.connection.query(`UPDATE layers SET visible = TRUE WHERE id = '${DEFAULT_LAYER_ID}';`);
   }
 
   private async assertFeatureLayerExists(id: string): Promise<void> {

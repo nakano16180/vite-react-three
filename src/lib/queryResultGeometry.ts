@@ -80,7 +80,7 @@ export const queryResultFeatures = (result: QueryResult, layerId: string): Geome
     })
   );
 
-export const queryResultStrokes = (result: QueryResult): RenderableStroke[] => {
+export const queryResultStrokes = (result: QueryResult, renderOrder?: number): RenderableStroke[] => {
   return queryResultGeometries(result).map(({ rowIndex, geometry, properties }) =>
     toRenderableStroke(
       createGeometryFeature({
@@ -89,7 +89,8 @@ export const queryResultStrokes = (result: QueryResult): RenderableStroke[] => {
         properties,
         style: QUERY_RESULT_STYLE,
         layerId: "__query_result__",
-      })
+      }),
+      renderOrder
     )
   );
 };

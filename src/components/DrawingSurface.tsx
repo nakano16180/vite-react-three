@@ -10,15 +10,17 @@ import {
   type Point2D,
 } from "../lib/geometry";
 import { pointerToModelPixel } from "../lib/canvasCoordinates";
+import { drawingOverlayOrder, transparentGeometryMaterial } from "../lib/renderOrder";
 
 interface DrawingSurfaceProps {
   onFinish: (ptsPx: Point2D[], type: "line" | "polygon") => void | Promise<void>;
   color: string;
   width: number;
   enabled: boolean;
+  drawingRank: number;
 }
 
-export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfaceProps) {
+export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }: DrawingSurfaceProps) {
   const { camera, size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
@@ -125,15 +127,24 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
   return (
     <group>
       {/* 確定済みの線分 */}
-      {enabled && currentPtsWorld.length >= 2 && <Line points={currentPtsWorld} color={color} lineWidth={width} />}
+      {enabled && currentPtsWorld.length >= 2 && (
+        <Line
+          points={currentPtsWorld}
+          color={color}
+          lineWidth={width}
+          renderOrder={drawingOverlayOrder(drawingRank, "outline")}
+          {...transparentGeometryMaterial}
+        />
+      )}
       {/* プレビュー線（半透明） */}
       {previewLine && (
         <Line
           points={previewLine as [number, number, number][]}
           color={color}
           lineWidth={width}
-          transparent
           opacity={0.4}
+          renderOrder={drawingOverlayOrder(drawingRank, "outline")}
+          {...transparentGeometryMaterial}
         />
       )}
       {hasPreviewTarget && hoverWorld && previewPtsPx.length >= 2 && (
@@ -163,9 +174,9 @@ export function DrawingSurface({ onFinish, color, width, enabled }: DrawingSurfa
       )}
       {/* 最後の点のハイライト */}
       {enabled && lastPt && (
-        <mesh position={lastPt}>
+        <mesh position={lastPt} renderOrder={drawingOverlayOrder(drawingRank, "handle")}>
           <circleGeometry args={[dotRadius, 16]} />
-          <meshBasicMaterial color={color} />
+          <meshBasicMaterial color={color} {...transparentGeometryMaterial} />
         </mesh>
       )}
       <mesh

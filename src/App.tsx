@@ -6,10 +6,12 @@ import { DrawingSurface } from "./components/DrawingSurface";
 import { StrokeEditor } from "./components/StrokeEditor";
 import { PanControls } from "./components/PanControls";
 import { SqlWorkbench } from "./components/SqlWorkbench";
+import { LayerPanel } from "./components/LayerPanel";
 import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
 import { useQueryWorkbench } from "./hooks/useQueryWorkbench";
+import { drawingRenderRank } from "./lib/renderOrder";
 
 type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
@@ -22,6 +24,7 @@ interface WorkspaceProps {
   strokeWidth: number;
   strokes: RenderableStroke[];
   temporaryStrokes: RenderableStroke[];
+  drawingRank: number;
   onFinishStroke: ReturnType<typeof useGeometryFeatures>["persistStroke"];
   onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
 }
@@ -35,6 +38,7 @@ function Workspace({
   strokeWidth,
   strokes,
   temporaryStrokes,
+  drawingRank,
   onFinishStroke,
   onUpdateStroke,
 }: WorkspaceProps) {
@@ -63,6 +67,7 @@ function Workspace({
               color={strokeColor}
               width={strokeWidth}
               enabled={interactionMode === "draw"}
+              drawingRank={drawingRank}
             />
           </Canvas>
         </div>
@@ -134,7 +139,9 @@ export default function App() {
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [simplifyOn, setSimplifyOn] = useState(true);
   const {
+    activeLayerId,
     canExport,
+    deleteLayer,
     features,
     handleClear,
     handleExportGeoJSON,
@@ -145,6 +152,10 @@ export default function App() {
     layers,
     operationNotice,
     promoteQueryResult,
+    renameLayer,
+    reorderLayers,
+    setActiveLayer,
+    setLayerVisibility,
     persistStroke,
     storageStatus,
     strokes,
@@ -181,6 +192,17 @@ export default function App() {
       />
 
       <div className="workbench-layout">
+        <LayerPanel
+          layers={layers}
+          features={features}
+          activeLayerId={activeLayerId}
+          disabled={loading}
+          onSetActive={setActiveLayer}
+          onSetVisibility={setLayerVisibility}
+          onRename={renameLayer}
+          onReorder={reorderLayers}
+          onDelete={deleteLayer}
+        />
         <Workspace
           interactionMode={interactionMode}
           loading={loading}
@@ -190,6 +212,7 @@ export default function App() {
           strokeWidth={strokeWidth}
           strokes={strokes}
           temporaryStrokes={query.temporaryStrokes}
+          drawingRank={drawingRenderRank(layers.length)}
           onFinishStroke={persistStroke}
           onUpdateStroke={updateStroke}
         />
