@@ -28,6 +28,23 @@ export const getPolygonPerimeter = (points: Point2D[]) => {
   return getPolylineLength([...points, points[0]]);
 };
 
+export const isPointInPolygon = (point: Point2D, polygon: Point2D[], epsilon = 1e-9): boolean => {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  const [px, py] = point;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+    const dx = xj - xi;
+    const dy = yj - yi;
+    const cross = (px - xi) * dy - (py - yi) * dx;
+    const dot = (px - xi) * (px - xj) + (py - yi) * (py - yj);
+    if (Math.abs(cross) <= epsilon && dot <= epsilon) return true;
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+};
+
 export const getCentroid = (points: Point2D[]): Point2D => {
   if (points.length === 0) return [0, 0];
   return [

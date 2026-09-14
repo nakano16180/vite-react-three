@@ -1,8 +1,10 @@
 import type { FeatureGeometry, GeometryFeature, Point2D } from "./geometryFeature";
 import { getPolygonArea, getPolygonPerimeter, getPolylineLength } from "../lib/geometry";
+import { persistentSelection, type SelectionIdentity } from "../lib/selection";
 
 export interface RenderableStroke {
   id: string;
+  selectionIdentity?: SelectionIdentity;
   color: string;
   width: number;
   ptsPx: Point2D[];
@@ -81,6 +83,7 @@ export const toRenderableStroke = (feature: GeometryFeature, renderOrder?: numbe
   const ptsPx = feature.geometry.coordinates;
   return {
     id: feature.id,
+    selectionIdentity: persistentSelection(feature.id),
     color: feature.style.strokeColor,
     width: feature.style.strokeWidth,
     ptsPx,

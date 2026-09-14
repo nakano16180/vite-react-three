@@ -290,6 +290,15 @@ textarea {
   box-shadow: inset 3px 0 #ec4899;
 }
 
+.query-table-wrap tr[data-selected="true"] td {
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+.query-table-wrap tr[data-query-selection="temporary"] td:first-child {
+  box-shadow: inset 3px 0 #f59e0b;
+}
+
 .query-table-wrap th small {
   display: block;
   color: #718096;

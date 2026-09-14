@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createQueryRuntime, type QueryResult, type QueryRuntime } from "../db/queryRuntime";
 import type { GeometryFeature, Layer } from "../domain/geometryFeature";
 import type { RenderableStroke } from "../domain/renderableStroke";
-import { queryResultStrokes } from "../lib/queryResultGeometry";
+import { queryResultSelectionIdentities, queryResultStrokes } from "../lib/queryResultGeometry";
 import { queryRenderRank } from "../lib/renderOrder";
+import { selectionIdentityKey } from "../lib/selection";
 
 export type QueryUiStatus = "initializing" | "ready" | "running" | "cancelled" | "empty" | "success" | "error";
 
@@ -35,11 +36,14 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
   const [status, setStatus] = useState<QueryUiStatus>("initializing");
   const [result, setResult] = useState<QueryResult | null>(null);
   const [temporaryStrokes, setTemporaryStrokes] = useState<RenderableStroke[]>([]);
+  const [queryKey, setQueryKey] = useState("query-0");
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     if (storageLoading) return;
+    setResult(null);
     setTemporaryStrokes([]);
+    setQueryKey("query-0");
     const snapshot = { features, layers };
     queueRef.current = queueRef.current.then(async () => {
       try {
@@ -65,7 +69,10 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
 
   const execute = useCallback(async () => {
     const request = ++requestRef.current;
+    const nextQueryKey = `query-${request}`;
     setStatus("running");
+    setQueryKey(nextQueryKey);
+    setResult(null);
     setTemporaryStrokes([]);
     setError(undefined);
     setHistory((current) => [sql, ...current.filter((entry) => entry !== sql)].slice(0, 10));
@@ -77,7 +84,13 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
       const next = await runtime.execute(sql);
       if (request !== requestRef.current || !next) return;
       setResult(next);
-      setTemporaryStrokes(queryResultStrokes(next, queryRenderRank(layers.length)));
+      setTemporaryStrokes(
+        queryResultStrokes(next, {
+          renderOrder: queryRenderRank(layers.length),
+          temporaryQueryKey: nextQueryKey,
+          persistentFeatureIds: new Set(features.map(({ id }) => id)),
+        })
+      );
       setStatus(next.status);
     } catch (cause) {
       if (request !== requestRef.current) return;
@@ -85,7 +98,7 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
       setStatus("error");
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [layers.length, sql]);
+  }, [features, layers.length, sql]);
 
   const cancel = useCallback(async () => {
     requestRef.current += 1;
@@ -94,5 +107,27 @@ export function useQueryWorkbench(features: GeometryFeature[], layers: Layer[], 
     setStatus("cancelled");
   }, []);
 
-  return { cancel, error, execute, history, result, setSql, sql, status, temporaryStrokes };
+  const persistentFeatureIds = useMemo(() => new Set(features.map(({ id }) => id)), [features]);
+  const selectionByRow = useMemo(
+    () => (result ? queryResultSelectionIdentities(result, queryKey, persistentFeatureIds) : new Map()),
+    [persistentFeatureIds, queryKey, result]
+  );
+  const selectionKeys = useMemo(
+    () => new Set([...selectionByRow.values()].map(selectionIdentityKey)),
+    [selectionByRow]
+  );
+
+  return {
+    cancel,
+    error,
+    execute,
+    history,
+    result,
+    selectionByRow,
+    selectionKeys,
+    setSql,
+    sql,
+    status,
+    temporaryStrokes,
+  };
 }

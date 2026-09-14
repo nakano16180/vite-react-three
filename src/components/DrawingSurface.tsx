@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
+import type { ThreeEvent } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
 import type { Mesh } from "three";
 import {
   getPolygonArea,
   getPolygonPerimeter,
   getPolylineLength,
+  isPointInPolygon,
   isPolygonCloseCandidate,
   type Point2D,
 } from "../lib/geometry";
 import { pointerToModelPixel } from "../lib/canvasCoordinates";
 import { drawingOverlayOrder, transparentGeometryMaterial } from "../lib/renderOrder";
+import type { RenderableStroke } from "../domain/renderableStroke";
 
 interface DrawingSurfaceProps {
   onFinish: (ptsPx: Point2D[], type: "line" | "polygon") => void | Promise<void>;
@@ -18,14 +21,52 @@ interface DrawingSurfaceProps {
   width: number;
   enabled: boolean;
   drawingRank: number;
+  onCanvasClick?: (additive: boolean) => void;
+  selectableStrokes?: RenderableStroke[];
+  onSelectStroke?: (stroke: RenderableStroke, additive: boolean) => void;
 }
 
-export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }: DrawingSurfaceProps) {
+const segmentDistance = (point: Point2D, start: Point2D, end: Point2D): number => {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  if (dx === 0 && dy === 0) return Math.hypot(point[0] - start[0], point[1] - start[1]);
+  const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(point[0] - (start[0] + t * dx), point[1] - (start[1] + t * dy));
+};
+
+export function DrawingSurface({
+  onFinish,
+  color,
+  width,
+  enabled,
+  drawingRank,
+  onCanvasClick,
+  selectableStrokes = [],
+  onSelectStroke,
+}: DrawingSurfaceProps) {
   const { camera, size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
   const currentPtsPxRef = useRef<Point2D[]>([]);
   const interactionPlaneRef = useRef<Mesh>(null);
+  const modifierRef = useRef(false);
+
+  useEffect(() => {
+    const updateModifier = (event: KeyboardEvent) => {
+      modifierRef.current = event.ctrlKey || event.metaKey;
+    };
+    const clearModifier = () => {
+      modifierRef.current = false;
+    };
+    window.addEventListener("keydown", updateModifier);
+    window.addEventListener("keyup", updateModifier);
+    window.addEventListener("blur", clearModifier);
+    return () => {
+      window.removeEventListener("keydown", updateModifier);
+      window.removeEventListener("keyup", updateModifier);
+      window.removeEventListener("blur", clearModifier);
+    };
+  }, []);
 
   const worldToPx = useCallback(
     (wx: number, wy: number): Point2D => {
@@ -84,8 +125,40 @@ export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }:
     setHoverWorld(null);
   }, [enabled]);
 
-  const onClick = (e: { stopPropagation: () => void; pointer: { x: number; y: number } }) => {
-    if (!enabled) return;
+  const handleSelection = (e: ThreeEvent<MouseEvent>) => {
+    if (!enabled) {
+      const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
+      const hit = selectableStrokes.reduce<{ stroke: RenderableStroke; distance: number } | null>((nearest, stroke) => {
+        const points = stroke.geomType === "polygon" ? [...stroke.ptsPx, stroke.ptsPx[0]] : stroke.ptsPx;
+        const inside = stroke.geomType === "polygon" && isPointInPolygon(pointPx, stroke.ptsPx);
+        let distance = inside ? 0 : Infinity;
+        for (let index = 0; index < points.length - 1; index += 1) {
+          distance = Math.min(distance, segmentDistance(pointPx, points[index], points[index + 1]));
+        }
+        const order = stroke.renderOrder ?? 0;
+        const nearestOrder = nearest?.stroke.renderOrder ?? 0;
+        if (!nearest || distance < nearest.distance || (distance === nearest.distance && order > nearestOrder))
+          nearest = { stroke, distance };
+        return nearest;
+      }, null);
+      if (hit && hit.distance <= 14 / Math.max(camera.zoom, 0.01) && onSelectStroke) {
+        e.stopPropagation();
+        onSelectStroke(
+          hit.stroke,
+          modifierRef.current || e.ctrlKey || e.metaKey || e.nativeEvent.ctrlKey || e.nativeEvent.metaKey
+        );
+      } else if (onCanvasClick) {
+        e.stopPropagation();
+        onCanvasClick(modifierRef.current || e.ctrlKey || e.metaKey || e.nativeEvent.ctrlKey || e.nativeEvent.metaKey);
+      }
+    }
+  };
+
+  const onClick = (e: ThreeEvent<MouseEvent>) => {
+    if (!enabled) {
+      handleSelection(e);
+      return;
+    }
     e.stopPropagation();
     const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
     const nextWorld = pxToWorld(pointPx[0], pointPx[1]);
