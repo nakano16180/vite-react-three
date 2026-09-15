@@ -132,9 +132,9 @@ export function SqlWorkbench({
                 {query.result.rows.map((row, index) => {
                   const identity = query.selectionByRow.get(index);
                   const selected = identity ? selection.some((entry) => sameSelectionIdentity(entry, identity)) : false;
-                  const selectRow = () => {
+                  const selectRow = (additive: boolean) => {
                     if (!selectable || !identity) return;
-                    onSelect(identity, false);
+                    onSelect(identity, additive);
                   };
                   return (
                     <tr
@@ -151,7 +151,7 @@ export function SqlWorkbench({
                       onKeyDown={(event) => {
                         if ((event.key === "Enter" || event.key === " ") && selectable && identity) {
                           event.preventDefault();
-                          selectRow();
+                          selectRow(event.ctrlKey || event.metaKey);
                         }
                       }}
                     >

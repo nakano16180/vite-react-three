@@ -137,11 +137,12 @@ export function DrawingSurface({
         }
         const order = stroke.renderOrder ?? 0;
         const nearestOrder = nearest?.stroke.renderOrder ?? 0;
-        if (!nearest || distance < nearest.distance || (distance === nearest.distance && order > nearestOrder))
+        if (!nearest || distance < nearest.distance || (distance === nearest.distance && order >= nearestOrder))
           nearest = { stroke, distance };
         return nearest;
       }, null);
-      if (hit && hit.distance <= 14 / Math.max(camera.zoom, 0.01) && onSelectStroke) {
+      const hitTolerance = hit ? Math.max(14, hit.stroke.width / 2) : 0;
+      if (hit && hit.distance <= hitTolerance / Math.max(camera.zoom, 0.01) && onSelectStroke) {
         e.stopPropagation();
         onSelectStroke(
           hit.stroke,

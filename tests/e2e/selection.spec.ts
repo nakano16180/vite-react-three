@@ -7,6 +7,104 @@ const gotoApp = async (page: Page) => {
 };
 
 test.describe("TASK-2.2 feature selection", () => {
+  test("同順位の後勝ち・太線の表示端部・SQLキーボード加算選択を実ブラウザーで確認する", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    const clickCanvas = (x: number, y: number) => page.mouse.click(box.x + x, box.y + y);
+    const status = page.getByTestId("selection-status");
+    const importFeatures = async (features: unknown[]) => {
+      await page.locator("#geojson-file-input").setInputFiles({
+        name: "selection-boundaries.geojson",
+        mimeType: "application/geo+json",
+        buffer: Buffer.from(JSON.stringify({ type: "FeatureCollection", features })),
+      });
+      await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+    };
+    const line = (id: string, coordinates: [[number, number], [number, number]], strokeWidth = 4) => ({
+      type: "Feature",
+      id,
+      geometry: { type: "LineString", coordinates },
+      properties: {},
+      workbench: { style: { strokeColor: "#222222", strokeWidth }, layerId: "default" },
+    });
+
+    // Two same-layer lines have the same renderOrder. The later feature must win at their overlap.
+    await importFeatures([
+      line("overlap-first", [
+        [100, 100],
+        [300, 200],
+      ]),
+      line("overlap-later", [
+        [100, 100],
+        [300, 200],
+      ]),
+      line(
+        "wide-line",
+        [
+          [100, 300],
+          [300, 300],
+        ],
+        40
+      ),
+    ]);
+    await expect(page.locator(".layer-item__count")).toHaveText("3");
+    await page.getByRole("button", { name: "Measure" }).click();
+    await clickCanvas(200, 150);
+    await expect(status).toHaveText("選択: 1件 (persistent:overlap-later)");
+
+    // 18px from the centerline is outside the old 14px tolerance but inside a 40px stroke's visible half-width.
+    await clickCanvas(200, 318);
+    await expect(status).toHaveText("選択: 1件 (persistent:wide-line)");
+
+    // Keyboard modifiers must preserve the additive selection behavior for both supported keys/modifiers.
+    await page.getByRole("button", { name: "Clear" }).click();
+    await importFeatures([
+      line("keyboard-one", [
+        [100, 100],
+        [180, 100],
+      ]),
+      line("keyboard-two", [
+        [100, 200],
+        [180, 200],
+      ]),
+      line("keyboard-three", [
+        [100, 300],
+        [180, 300],
+      ]),
+      line("keyboard-four", [
+        [100, 400],
+        [180, 400],
+      ]),
+    ]);
+    await expect(page.locator(".layer-item__count")).toHaveText("4");
+    await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features ORDER BY feature_order");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
+    const rows = page.locator('tbody tr[data-query-selection="persistent"]');
+    await expect(rows).toHaveCount(4);
+
+    await rows.nth(0).click();
+    await expect(status).toHaveText("選択: 1件 (persistent:keyboard-one)");
+    await rows.nth(1).press("Control+Enter");
+    await expect(status).toHaveText(/選択: 2件/);
+    await rows.nth(2).press("Meta+Space");
+    await expect(status).toHaveText(/選択: 3件/);
+    await rows.nth(3).press("Control+Space");
+    await expect(status).toHaveText(/選択: 4件/);
+
+    // Meta+Enter follows the same additive path after replacing the selection.
+    await clickCanvas(box.width - 30, box.height - 30);
+    await rows.nth(0).click();
+    await rows.nth(1).press("Meta+Enter");
+    await expect(status).toHaveText(/選択: 2件/);
+  });
+
   test("polygon, topmost temporary geometry, and id-only SQL rows select correctly", async ({ page }) => {
     test.setTimeout(120_000);
     const consoleIssues: string[] = [];
