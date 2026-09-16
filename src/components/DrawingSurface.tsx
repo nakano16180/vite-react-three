@@ -128,21 +128,25 @@ export function DrawingSurface({
   const handleSelection = (e: ThreeEvent<MouseEvent>) => {
     if (!enabled) {
       const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
-      const hit = selectableStrokes.reduce<{ stroke: RenderableStroke; distance: number } | null>((nearest, stroke) => {
+      const candidates = selectableStrokes.flatMap((stroke) => {
         const points = stroke.geomType === "polygon" ? [...stroke.ptsPx, stroke.ptsPx[0]] : stroke.ptsPx;
         const inside = stroke.geomType === "polygon" && isPointInPolygon(pointPx, stroke.ptsPx);
         let distance = inside ? 0 : Infinity;
         for (let index = 0; index < points.length - 1; index += 1) {
           distance = Math.min(distance, segmentDistance(pointPx, points[index], points[index + 1]));
         }
+        const tolerance = Math.max(14, stroke.width / 2) / Math.max(camera.zoom, 0.01);
+        return distance <= tolerance ? [{ stroke, distance }] : [];
+      });
+      const hit = candidates.reduce<{ stroke: RenderableStroke; distance: number } | null>((nearest, candidate) => {
+        const { stroke, distance } = candidate;
         const order = stroke.renderOrder ?? 0;
         const nearestOrder = nearest?.stroke.renderOrder ?? 0;
-        if (!nearest || distance < nearest.distance || (distance === nearest.distance && order >= nearestOrder))
-          nearest = { stroke, distance };
+        if (!nearest || order > nearestOrder || (order === nearestOrder && distance <= nearest.distance))
+          return { stroke, distance };
         return nearest;
       }, null);
-      const hitTolerance = hit ? Math.max(14, hit.stroke.width / 2) : 0;
-      if (hit && hit.distance <= hitTolerance / Math.max(camera.zoom, 0.01) && onSelectStroke) {
+      if (hit && onSelectStroke) {
         e.stopPropagation();
         onSelectStroke(
           hit.stroke,

@@ -52,8 +52,12 @@ test.describe("TASK-2.2 feature selection", () => {
         ],
         40
       ),
+      line("thin-line", [
+        [100, 300],
+        [300, 300],
+      ]),
     ]);
-    await expect(page.locator(".layer-item__count")).toHaveText("3");
+    await expect(page.locator(".layer-item__count")).toHaveText("4");
     await page.getByRole("button", { name: "Measure" }).click();
     await clickCanvas(200, 150);
     await expect(status).toHaveText("選択: 1件 (persistent:overlap-later)");
@@ -105,7 +109,8 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(status).toHaveText(/選択: 2件/);
   });
 
-  test("polygon, topmost temporary geometry, and id-only SQL rows select correctly", async ({ page }) => {
+  test("polygon, topmost temporary geometry, and id-only SQL rows select correctly", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     const consoleIssues: string[] = [];
     const pageErrors: string[] = [];
@@ -204,7 +209,8 @@ test.describe("TASK-2.2 feature selection", () => {
 
   test("canvas and SQL table selection stay synchronized without conflicting with interaction modes", async ({
     page,
-  }) => {
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     const consoleIssues: string[] = [];
     const pageErrors: string[] = [];
@@ -317,5 +323,55 @@ test.describe("TASK-2.2 feature selection", () => {
     expect(consoleIssues).toEqual([]);
     expect(pageErrors).toEqual([]);
     expect(failedRequests).toEqual([]);
+  });
+
+  test("2つともヒットする場合は表示順を距離より優先する", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    await page.locator("#geojson-file-input").setInputFiles({
+      name: "selection-boundary.geojson",
+      mimeType: "application/geo+json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "wide-persistent",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [100, 350],
+                  [300, 350],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#222222", strokeWidth: 40 }, layerId: "default" },
+            },
+          ],
+        })
+      ),
+    });
+    await expect(page.locator(".layer-item__count")).toHaveText("1");
+    await page
+      .getByTestId("sql-editor")
+      .fill("SELECT ST_AsGeoJSON(ST_GeomFromText('LINESTRING (100 364, 300 364)')) AS geometry_geojson");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
+    const temporaryRow = page.locator('tbody tr[data-query-selection="temporary"]');
+    await expect(temporaryRow).toHaveCount(1);
+
+    await page.getByRole("button", { name: "Measure" }).click();
+    // Both strokes are within tolerance: persistent is 2px away, temporary is 12px away.
+    // The temporary query stroke must win because it is rendered above the persistent stroke.
+    await page.mouse.click(box.x + 200, box.y + 352);
+    await expect(page.getByTestId("selection-status")).toHaveText(/選択: 1件 \(temporary:/);
+    await expect(temporaryRow).toHaveAttribute("data-selected", "true");
   });
 });
