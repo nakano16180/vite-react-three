@@ -12,7 +12,7 @@ import {
   type Point2D,
 } from "../lib/geometry";
 import { pointerToModelPixel } from "../lib/canvasCoordinates";
-import { drawingOverlayOrder, transparentGeometryMaterial } from "../lib/renderOrder";
+import { drawingOverlayOrder, renderOrderFor, transparentGeometryMaterial } from "../lib/renderOrder";
 import type { RenderableStroke } from "../domain/renderableStroke";
 
 interface DrawingSurfaceProps {
@@ -86,7 +86,13 @@ export function DrawingSurface({
     [size.height, size.width, viewport.height, viewport.width]
   );
 
-  const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
+  // The orthographic camera exposes a larger world area when zoomed out. Keep
+  // the transparent hit plane covering that entire visible area so clicks in
+  // the newly visible outer region still clear selection and can be measured.
+  const planeArgs = useMemo<[number, number]>(
+    () => [viewport.width / Math.max(camera.zoom, 0.01), viewport.height / Math.max(camera.zoom, 0.01)],
+    [camera.zoom, viewport.height, viewport.width]
+  );
 
   useFrame(() => {
     interactionPlaneRef.current?.position.set(camera.position.x, camera.position.y, -0.001);
@@ -128,22 +134,36 @@ export function DrawingSurface({
   const handleSelection = (e: ThreeEvent<MouseEvent>) => {
     if (!enabled) {
       const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
-      const candidates = selectableStrokes.flatMap((stroke) => {
+      const candidates = selectableStrokes.flatMap((stroke, strokeIndex) => {
         const points = stroke.geomType === "polygon" ? [...stroke.ptsPx, stroke.ptsPx[0]] : stroke.ptsPx;
         const inside = stroke.geomType === "polygon" && isPointInPolygon(pointPx, stroke.ptsPx);
-        let distance = inside ? 0 : Infinity;
+        let edgeDistance = Infinity;
         for (let index = 0; index < points.length - 1; index += 1) {
-          distance = Math.min(distance, segmentDistance(pointPx, points[index], points[index + 1]));
+          edgeDistance = Math.min(edgeDistance, segmentDistance(pointPx, points[index], points[index + 1]));
         }
         const tolerance = Math.max(14, stroke.width / 2) / Math.max(camera.zoom, 0.01);
-        return distance <= tolerance ? [{ stroke, distance }] : [];
-      });
-      const hit = candidates.reduce<{ stroke: RenderableStroke; distance: number } | null>((nearest, candidate) => {
-        const { stroke, distance } = candidate;
         const order = stroke.renderOrder ?? 0;
-        const nearestOrder = nearest?.stroke.renderOrder ?? 0;
-        if (!nearest || order > nearestOrder || (order === nearestOrder && distance <= nearest.distance))
-          return { stroke, distance };
+        const hits: { stroke: RenderableStroke; distance: number; renderOrder: number; strokeIndex: number }[] = [];
+        if (inside) hits.push({ stroke, distance: 0, renderOrder: renderOrderFor(order, "fill"), strokeIndex });
+        if (edgeDistance <= tolerance) {
+          hits.push({
+            stroke,
+            distance: edgeDistance,
+            renderOrder: renderOrderFor(order, "outline"),
+            strokeIndex,
+          });
+        }
+        return hits;
+      });
+      const hit = candidates.reduce<(typeof candidates)[number] | null>((nearest, candidate) => {
+        if (
+          !nearest ||
+          candidate.renderOrder > nearest.renderOrder ||
+          (candidate.renderOrder === nearest.renderOrder &&
+            (candidate.distance < nearest.distance ||
+              (candidate.distance === nearest.distance && candidate.strokeIndex >= nearest.strokeIndex)))
+        )
+          return candidate;
         return nearest;
       }, null);
       if (hit && onSelectStroke) {

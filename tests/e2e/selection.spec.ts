@@ -374,4 +374,117 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(page.getByTestId("selection-status")).toHaveText(/選択: 1件 \(temporary:/);
     await expect(temporaryRow).toHaveAttribute("data-selected", "true");
   });
+
+  test("同順位の線の輪郭はpolygonの塗りより手前の表示対象として選択する", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    await page.locator("#geojson-file-input").setInputFiles({
+      name: "selection-elements.geojson",
+      mimeType: "application/geo+json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "same-rank-line",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [100, 200],
+                  [300, 200],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#222222", strokeWidth: 8 }, layerId: "default" },
+            },
+            {
+              type: "Feature",
+              id: "same-rank-polygon",
+              geometry: {
+                type: "Polygon",
+                coordinates: [
+                  [
+                    [100, 100],
+                    [300, 100],
+                    [300, 300],
+                    [100, 300],
+                    [100, 100],
+                  ],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#cc0000", strokeWidth: 8 }, layerId: "default" },
+            },
+          ],
+        })
+      ),
+    });
+    await expect(page.locator(".layer-item__count")).toHaveText("2");
+    await page.getByRole("button", { name: "Measure" }).click();
+    await page.mouse.click(box.x + 200, box.y + 200);
+    await expect(page.getByTestId("selection-status")).toHaveText("選択: 1件 (persistent:same-rank-line)");
+  });
+
+  test("zoom out後も可視範囲の外周クリックで選択解除できる", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    await page.locator("#geojson-file-input").setInputFiles({
+      name: "selection-zoom-out.geojson",
+      mimeType: "application/geo+json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "zoom-target",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [100, 200],
+                  [300, 200],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#222222", strokeWidth: 8 }, layerId: "default" },
+            },
+          ],
+        })
+      ),
+    });
+    await expect(page.locator(".layer-item__count")).toHaveText("1");
+    await page.getByRole("button", { name: "Measure" }).click();
+    await page.mouse.click(box.x + 200, box.y + 200);
+    await expect(page.getByTestId("selection-status")).toHaveText("選択: 1件 (persistent:zoom-target)");
+
+    await page.getByRole("button", { name: "Pan" }).click();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.65, { steps: 8 });
+    await page.mouse.up();
+    await page.mouse.wheel(0, 500);
+    await expect
+      .poll(async () => {
+        const viewportState = await page.evaluate(() => {
+          const value = localStorage.getItem("vite-react-three:viewport");
+          return value ? (JSON.parse(value) as { zoom?: number }).zoom : undefined;
+        });
+        return viewportState;
+      })
+      .toBeLessThan(1);
+    await page.getByRole("button", { name: "Measure" }).click();
+    await page.mouse.click(box.x + box.width - 4, box.y + box.height - 4);
+    await expect(page.getByTestId("selection-status")).toHaveText("選択: 0件");
+  });
 });
