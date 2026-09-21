@@ -78,6 +78,7 @@ function Workspace({
               width={strokeWidth}
               enabled={interactionMode === "draw"}
               drawingRank={drawingRank}
+              selection={selection}
               onCanvasClick={selectable ? onClearSelection : undefined}
               selectableStrokes={selectable ? [...strokes, ...temporaryStrokes] : undefined}
               onSelectStroke={

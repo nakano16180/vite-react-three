@@ -109,6 +109,65 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(status).toHaveText(/選択: 2件/);
   });
 
+  test("選択済みの下位重複strokeを再クリックしても選択を維持する", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    await page.locator("#geojson-file-input").setInputFiles({
+      name: "selection-selected-overlap.geojson",
+      mimeType: "application/geo+json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "overlap-first",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [100, 100],
+                  [300, 200],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#222222", strokeWidth: 4 }, layerId: "default" },
+            },
+            {
+              type: "Feature",
+              id: "overlap-later",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [100, 100],
+                  [300, 200],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#cc0000", strokeWidth: 4 }, layerId: "default" },
+            },
+          ],
+        })
+      ),
+    });
+    await expect(page.locator(".layer-item__count")).toHaveText("2");
+    await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features ORDER BY feature_order");
+    await page.getByRole("button", { name: "Run query" }).click();
+    await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
+    const rows = page.locator('tbody tr[data-query-selection="persistent"]');
+    await expect(rows).toHaveCount(2);
+    await page.getByRole("button", { name: "Measure" }).click();
+    await rows.nth(0).click();
+    const status = page.getByTestId("selection-status");
+    await expect(status).toHaveText("選択: 1件 (persistent:overlap-first)");
+    await page.mouse.click(box.x + 200, box.y + 150);
+    await expect(status).toHaveText("選択: 1件 (persistent:overlap-first)");
+  });
+
   test("polygon, topmost temporary geometry, and id-only SQL rows select correctly", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);

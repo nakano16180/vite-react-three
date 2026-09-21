@@ -13,6 +13,7 @@ import {
 } from "../lib/geometry";
 import { pointerToModelPixel } from "../lib/canvasCoordinates";
 import { drawingOverlayOrder, renderOrderFor, transparentGeometryMaterial } from "../lib/renderOrder";
+import { persistentSelection, selectionIdentityKey, type SelectionIdentity } from "../lib/selection";
 import type { RenderableStroke } from "../domain/renderableStroke";
 
 interface DrawingSurfaceProps {
@@ -23,6 +24,7 @@ interface DrawingSurfaceProps {
   drawingRank: number;
   onCanvasClick?: (additive: boolean) => void;
   selectableStrokes?: RenderableStroke[];
+  selection?: SelectionIdentity[];
   onSelectStroke?: (stroke: RenderableStroke, additive: boolean) => void;
 }
 
@@ -42,6 +44,7 @@ export function DrawingSurface({
   drawingRank,
   onCanvasClick,
   selectableStrokes = [],
+  selection = [],
   onSelectStroke,
 }: DrawingSurfaceProps) {
   const { camera, size, viewport } = useThree();
@@ -50,6 +53,7 @@ export function DrawingSurface({
   const currentPtsPxRef = useRef<Point2D[]>([]);
   const interactionPlaneRef = useRef<Mesh>(null);
   const modifierRef = useRef(false);
+  const selectedKeys = useMemo(() => new Set(selection.map(selectionIdentityKey)), [selection]);
 
   useEffect(() => {
     const updateModifier = (event: KeyboardEvent) => {
@@ -143,13 +147,22 @@ export function DrawingSurface({
         }
         const tolerance = Math.max(14, stroke.width / 2) / Math.max(camera.zoom, 0.01);
         const order = stroke.renderOrder ?? 0;
+        const selected = selectedKeys.has(
+          selectionIdentityKey(stroke.selectionIdentity ?? persistentSelection(stroke.id))
+        );
         const hits: { stroke: RenderableStroke; distance: number; renderOrder: number; strokeIndex: number }[] = [];
-        if (inside) hits.push({ stroke, distance: 0, renderOrder: renderOrderFor(order, "fill"), strokeIndex });
+        if (inside)
+          hits.push({
+            stroke,
+            distance: 0,
+            renderOrder: renderOrderFor(order, selected ? "handle" : "fill"),
+            strokeIndex,
+          });
         if (edgeDistance <= tolerance) {
           hits.push({
             stroke,
             distance: edgeDistance,
-            renderOrder: renderOrderFor(order, "outline"),
+            renderOrder: renderOrderFor(order, selected ? "handle" : "outline"),
             strokeIndex,
           });
         }
