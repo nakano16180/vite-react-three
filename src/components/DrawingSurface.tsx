@@ -145,17 +145,20 @@ export function DrawingSurface({
         for (let index = 0; index < points.length - 1; index += 1) {
           edgeDistance = Math.min(edgeDistance, segmentDistance(pointPx, points[index], points[index + 1]));
         }
-        const tolerance = Math.max(14, stroke.width / 2) / Math.max(camera.zoom, 0.01);
         const order = stroke.renderOrder ?? 0;
         const selected = selectedKeys.has(
           selectionIdentityKey(stroke.selectionIdentity ?? persistentSelection(stroke.id))
         );
+        // Scene widens a selected outline by 4px, so include that visible
+        // width when resolving clicks on the highlighted boundary.
+        const visibleWidth = selected ? stroke.width + 4 : stroke.width;
+        const tolerance = Math.max(14, visibleWidth / 2) / Math.max(camera.zoom, 0.01);
         const hits: { stroke: RenderableStroke; distance: number; renderOrder: number; strokeIndex: number }[] = [];
         if (inside)
           hits.push({
             stroke,
             distance: 0,
-            renderOrder: renderOrderFor(order, selected ? "handle" : "fill"),
+            renderOrder: renderOrderFor(order, "fill"),
             strokeIndex,
           });
         if (edgeDistance <= tolerance) {

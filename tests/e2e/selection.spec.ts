@@ -68,6 +68,7 @@ test.describe("TASK-2.2 feature selection", () => {
 
     // Keyboard modifiers must preserve the additive selection behavior for both supported keys/modifiers.
     await page.getByRole("button", { name: "Clear" }).click();
+    await expect(page.locator(".layer-item__count")).toHaveText("0");
     await importFeatures([
       line("keyboard-one", [
         [100, 100],
@@ -488,6 +489,112 @@ test.describe("TASK-2.2 feature selection", () => {
     await page.getByRole("button", { name: "Measure" }).click();
     await page.mouse.click(box.x + 200, box.y + 200);
     await expect(page.getByTestId("selection-status")).toHaveText("選択: 1件 (persistent:same-rank-line)");
+  });
+
+  test("選択中polygonの内部より同layerの線を手前の表示対象として選択する", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    await expect(page.locator(".layer-item__count")).toHaveText("0");
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    await page.locator("#geojson-file-input").setInputFiles({
+      name: "selected-polygon-interior.geojson",
+      mimeType: "application/geo+json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "interior-line",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [100, 200],
+                  [300, 200],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#222222", strokeWidth: 8 }, layerId: "default" },
+            },
+            {
+              type: "Feature",
+              id: "selected-polygon",
+              geometry: {
+                type: "Polygon",
+                coordinates: [
+                  [
+                    [100, 100],
+                    [300, 100],
+                    [300, 300],
+                    [100, 300],
+                    [100, 100],
+                  ],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#cc0000", strokeWidth: 8 }, layerId: "default" },
+            },
+          ],
+        })
+      ),
+    });
+    await expect(page.locator(".layer-item__count")).toHaveText("2");
+    const status = page.getByTestId("selection-status");
+    await page.getByRole("button", { name: "Measure" }).click();
+    await page.mouse.click(box.x + 200, box.y + 150);
+    await expect(status).toHaveText("選択: 1件 (persistent:selected-polygon)");
+
+    await page.mouse.click(box.x + 200, box.y + 200);
+    await expect(status).toHaveText("選択: 1件 (persistent:interior-line)");
+  });
+
+  test("選択で拡張された太線の可視外縁をクリックしても選択を維持する", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await page.getByRole("button", { name: "Clear" }).click();
+    await expect(page.locator(".layer-item__count")).toHaveText("0");
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    await page.locator("#geojson-file-input").setInputFiles({
+      name: "selected-wide-line.geojson",
+      mimeType: "application/geo+json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "selected-wide-line",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [100, 200],
+                  [300, 200],
+                ],
+              },
+              properties: {},
+              workbench: { style: { strokeColor: "#222222", strokeWidth: 40 }, layerId: "default" },
+            },
+          ],
+        })
+      ),
+    });
+    await expect(page.locator(".layer-item__count")).toHaveText("1");
+    await page.getByRole("button", { name: "Measure" }).click();
+    const status = page.getByTestId("selection-status");
+    await page.mouse.click(box.x + 200, box.y + 200);
+    await expect(status).toHaveText("選択: 1件 (persistent:selected-wide-line)");
+
+    // A selected 40px stroke is rendered at 44px. At 21px from its center,
+    // the click is outside the original stroke but inside the visible selected edge.
+    await page.mouse.click(box.x + 200, box.y + 221);
+    await expect(status).toHaveText("選択: 1件 (persistent:selected-wide-line)");
   });
 
   test("zoom out後も可視範囲の外周クリックで選択解除できる", async ({ page }, testInfo) => {
