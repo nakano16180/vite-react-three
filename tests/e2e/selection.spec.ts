@@ -1,50 +1,129 @@
 import { expect, type Page, test } from "@playwright/test";
 
+type GeoJSONFeature = {
+  type: "Feature";
+  id: string;
+  geometry: { type: "LineString" | "Polygon"; coordinates: unknown };
+  properties: Record<string, unknown>;
+  workbench: { style: { strokeColor: string; strokeWidth: number }; layerId: string };
+};
+
+type GeoJSONLayer = {
+  id: string;
+  name: string;
+  visible: boolean;
+  order: number;
+  createdAt: string;
+};
+
 const gotoApp = async (page: Page) => {
   await page.goto("./");
   await expect(page.getByTestId("app-shell")).toBeVisible();
   await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
 };
 
+const persistentRows = (page: Page) => page.locator('tbody tr[data-query-selection="persistent"]');
+
+const queryPersistentIds = async (page: Page, expectedIds: string[]) => {
+  await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features ORDER BY id");
+  const runQuery = page.getByRole("button", { name: "Run query" });
+  await expect(runQuery).toBeEnabled({ timeout: 30_000 });
+  await runQuery.click();
+  await expect(page.getByTestId("query-status")).toHaveText(expectedIds.length === 0 ? "empty" : "success", {
+    timeout: 30_000,
+  });
+  const rows = persistentRows(page);
+  await expect(rows).toHaveCount(expectedIds.length);
+  await expect
+    .poll(async () => (await rows.locator("td:first-child").allInnerTexts()).sort(), {
+      message: `repository should contain exactly: ${expectedIds.join(", ")}`,
+    })
+    .toEqual([...expectedIds].sort());
+};
+
+const clearFeatures = async (page: Page) => {
+  await page.getByRole("button", { name: "Clear" }).click();
+  await expect(page.locator(".layer-item__count")).toHaveText("0");
+  await queryPersistentIds(page, []);
+};
+
+const importFeatures = async (
+  page: Page,
+  features: GeoJSONFeature[],
+  options: { fileName?: string; layers?: GeoJSONLayer[] } = {}
+) => {
+  await page.locator("#geojson-file-input").setInputFiles({
+    name: options.fileName ?? "selection-features.geojson",
+    mimeType: "application/geo+json",
+    buffer: Buffer.from(
+      JSON.stringify({
+        type: "FeatureCollection",
+        features,
+        ...(options.layers ? { workbench: { layers: options.layers } } : {}),
+      })
+    ),
+  });
+  await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
+  await expect
+    .poll(
+      async () =>
+        (await page.locator(".layer-item__count").allInnerTexts()).reduce(
+          (total, count) => total + Number.parseInt(count, 10),
+          0
+        ),
+      { message: "imported feature count should be visible before querying repository identities" }
+    )
+    .toBe(features.length);
+  await queryPersistentIds(
+    page,
+    features.map(({ id }) => id)
+  );
+};
+
+const lineFeature = (
+  id: string,
+  coordinates: [[number, number], [number, number]],
+  strokeWidth = 4,
+  layerId = "default"
+): GeoJSONFeature => ({
+  type: "Feature",
+  id,
+  geometry: { type: "LineString", coordinates },
+  properties: {},
+  workbench: { style: { strokeColor: "#222222", strokeWidth }, layerId },
+});
+
+const polygonFeature = (id: string, coordinates: [number, number][], strokeWidth = 4): GeoJSONFeature => ({
+  type: "Feature",
+  id,
+  geometry: { type: "Polygon", coordinates: [coordinates] },
+  properties: {},
+  workbench: { style: { strokeColor: "#cc0000", strokeWidth }, layerId: "default" },
+});
+
 test.describe("TASK-2.2 feature selection", () => {
   test("同順位の後勝ち・太線の表示端部・SQLキーボード加算選択を実ブラウザーで確認する", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
 
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
     const clickCanvas = (x: number, y: number) => page.mouse.click(box.x + x, box.y + y);
     const status = page.getByTestId("selection-status");
-    const importFeatures = async (features: unknown[]) => {
-      await page.locator("#geojson-file-input").setInputFiles({
-        name: "selection-boundaries.geojson",
-        mimeType: "application/geo+json",
-        buffer: Buffer.from(JSON.stringify({ type: "FeatureCollection", features })),
-      });
-      await expect(page.getByTestId("loading-overlay")).toBeHidden({ timeout: 30_000 });
-    };
-    const line = (id: string, coordinates: [[number, number], [number, number]], strokeWidth = 4) => ({
-      type: "Feature",
-      id,
-      geometry: { type: "LineString", coordinates },
-      properties: {},
-      workbench: { style: { strokeColor: "#222222", strokeWidth }, layerId: "default" },
-    });
-
     // Two same-layer lines have the same renderOrder. The later feature must win at their overlap.
-    await importFeatures([
-      line("overlap-first", [
+    await importFeatures(page, [
+      lineFeature("overlap-first", [
         [100, 100],
         [300, 200],
       ]),
-      line("overlap-later", [
+      lineFeature("overlap-later", [
         [100, 100],
         [300, 200],
       ]),
-      line(
+      lineFeature(
         "wide-line",
         [
           [100, 300],
@@ -52,7 +131,7 @@ test.describe("TASK-2.2 feature selection", () => {
         ],
         40
       ),
-      line("thin-line", [
+      lineFeature("thin-line", [
         [100, 300],
         [300, 300],
       ]),
@@ -67,22 +146,21 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(status).toHaveText("選択: 1件 (persistent:wide-line)");
 
     // Keyboard modifiers must preserve the additive selection behavior for both supported keys/modifiers.
-    await page.getByRole("button", { name: "Clear" }).click();
-    await expect(page.locator(".layer-item__count")).toHaveText("0");
-    await importFeatures([
-      line("keyboard-one", [
+    await clearFeatures(page);
+    await importFeatures(page, [
+      lineFeature("keyboard-one", [
         [100, 100],
         [180, 100],
       ]),
-      line("keyboard-two", [
+      lineFeature("keyboard-two", [
         [100, 200],
         [180, 200],
       ]),
-      line("keyboard-three", [
+      lineFeature("keyboard-three", [
         [100, 300],
         [180, 300],
       ]),
-      line("keyboard-four", [
+      lineFeature("keyboard-four", [
         [100, 400],
         [180, 400],
       ]),
@@ -114,48 +192,42 @@ test.describe("TASK-2.2 feature selection", () => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
-    await page.locator("#geojson-file-input").setInputFiles({
-      name: "selection-selected-overlap.geojson",
-      mimeType: "application/geo+json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              id: "overlap-first",
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [100, 100],
-                  [300, 200],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#222222", strokeWidth: 4 }, layerId: "default" },
-            },
-            {
-              type: "Feature",
-              id: "overlap-later",
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [100, 100],
-                  [300, 200],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#cc0000", strokeWidth: 4 }, layerId: "default" },
-            },
-          ],
-        })
-      ),
-    });
-    await expect(page.locator(".layer-item__count")).toHaveText("2");
+    await importFeatures(
+      page,
+      [
+        {
+          type: "Feature",
+          id: "overlap-first",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [100, 100],
+              [300, 200],
+            ],
+          },
+          properties: {},
+          workbench: { style: { strokeColor: "#222222", strokeWidth: 4 }, layerId: "default" },
+        },
+        {
+          type: "Feature",
+          id: "overlap-later",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [100, 100],
+              [300, 200],
+            ],
+          },
+          properties: {},
+          workbench: { style: { strokeColor: "#cc0000", strokeWidth: 4 }, layerId: "default" },
+        },
+      ],
+      { fileName: "selection-selected-overlap.geojson" }
+    );
     await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features ORDER BY feature_order");
     await page.getByRole("button", { name: "Run query" }).click();
     await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
@@ -188,7 +260,7 @@ test.describe("TASK-2.2 feature selection", () => {
 
     // 1. Draw and persist a polygon, then wait for its saved feature count to become observable.
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
@@ -218,7 +290,7 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(status).toHaveText("選択: 0件");
 
     // 3. Replace the polygon with a persistent line and render an ID-less temporary query line at identical coordinates.
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     await expect(page.locator(".layer-item__count")).toHaveText("0");
     await page.getByRole("button", { name: "Draw" }).click();
     await clickCanvas(100, 100);
@@ -288,7 +360,7 @@ test.describe("TASK-2.2 feature selection", () => {
 
     // 1. Create two persistent features and wait until both are observable from the saved feature count.
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
@@ -385,40 +457,29 @@ test.describe("TASK-2.2 feature selection", () => {
     expect(failedRequests).toEqual([]);
   });
 
-  test("2つともヒットする場合は表示順を距離より優先する", async ({ page }, testInfo) => {
+  test("可視strokeは手前の見えないクリック余白より優先する", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
 
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
-    await page.locator("#geojson-file-input").setInputFiles({
-      name: "selection-boundary.geojson",
-      mimeType: "application/geo+json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              id: "wide-persistent",
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [100, 350],
-                  [300, 350],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#222222", strokeWidth: 40 }, layerId: "default" },
-            },
+    await importFeatures(
+      page,
+      [
+        lineFeature(
+          "wide-persistent",
+          [
+            [100, 350],
+            [300, 350],
           ],
-        })
-      ),
-    });
-    await expect(page.locator(".layer-item__count")).toHaveText("1");
+          40
+        ),
+      ],
+      { fileName: "selection-boundary.geojson" }
+    );
     await page
       .getByTestId("sql-editor")
       .fill("SELECT ST_AsGeoJSON(ST_GeomFromText('LINESTRING (100 364, 300 364)')) AS geometry_geojson");
@@ -428,63 +489,46 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(temporaryRow).toHaveCount(1);
 
     await page.getByRole("button", { name: "Measure" }).click();
-    // Both strokes are within tolerance: persistent is 2px away, temporary is 12px away.
-    // The temporary query stroke must win because it is rendered above the persistent stroke.
+    // Both strokes are within tolerance: persistent is visibly painted 2px away,
+    // while the frontmost temporary stroke contributes only its invisible 14px halo.
     await page.mouse.click(box.x + 200, box.y + 352);
-    await expect(page.getByTestId("selection-status")).toHaveText(/選択: 1件 \(temporary:/);
-    await expect(temporaryRow).toHaveAttribute("data-selected", "true");
+    await expect(page.getByTestId("selection-status")).toHaveText("選択: 1件 (persistent:wide-persistent)");
+    await expect(temporaryRow).not.toHaveAttribute("data-selected", "true");
   });
 
   test("同順位の線の輪郭はpolygonの塗りより手前の表示対象として選択する", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
-    await page.locator("#geojson-file-input").setInputFiles({
-      name: "selection-elements.geojson",
-      mimeType: "application/geo+json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              id: "same-rank-line",
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [100, 200],
-                  [300, 200],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#222222", strokeWidth: 8 }, layerId: "default" },
-            },
-            {
-              type: "Feature",
-              id: "same-rank-polygon",
-              geometry: {
-                type: "Polygon",
-                coordinates: [
-                  [
-                    [100, 100],
-                    [300, 100],
-                    [300, 300],
-                    [100, 300],
-                    [100, 100],
-                  ],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#cc0000", strokeWidth: 8 }, layerId: "default" },
-            },
+    await importFeatures(
+      page,
+      [
+        lineFeature(
+          "same-rank-line",
+          [
+            [100, 200],
+            [300, 200],
           ],
-        })
-      ),
-    });
+          8
+        ),
+        polygonFeature(
+          "same-rank-polygon",
+          [
+            [100, 100],
+            [300, 100],
+            [300, 300],
+            [100, 300],
+            [100, 100],
+          ],
+          8
+        ),
+      ],
+      { fileName: "selection-elements.geojson" }
+    );
     await expect(page.locator(".layer-item__count")).toHaveText("2");
     await page.getByRole("button", { name: "Measure" }).click();
     await page.mouse.click(box.x + 200, box.y + 200);
@@ -495,53 +539,36 @@ test.describe("TASK-2.2 feature selection", () => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     await expect(page.locator(".layer-item__count")).toHaveText("0");
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
-    await page.locator("#geojson-file-input").setInputFiles({
-      name: "selected-polygon-interior.geojson",
-      mimeType: "application/geo+json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              id: "interior-line",
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [100, 200],
-                  [300, 200],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#222222", strokeWidth: 8 }, layerId: "default" },
-            },
-            {
-              type: "Feature",
-              id: "selected-polygon",
-              geometry: {
-                type: "Polygon",
-                coordinates: [
-                  [
-                    [100, 100],
-                    [300, 100],
-                    [300, 300],
-                    [100, 300],
-                    [100, 100],
-                  ],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#cc0000", strokeWidth: 8 }, layerId: "default" },
-            },
+    await importFeatures(
+      page,
+      [
+        lineFeature(
+          "interior-line",
+          [
+            [100, 200],
+            [300, 200],
           ],
-        })
-      ),
-    });
+          8
+        ),
+        polygonFeature(
+          "selected-polygon",
+          [
+            [100, 100],
+            [300, 100],
+            [300, 300],
+            [100, 300],
+            [100, 100],
+          ],
+          8
+        ),
+      ],
+      { fileName: "selected-polygon-interior.geojson" }
+    );
     await expect(page.locator(".layer-item__count")).toHaveText("2");
     const status = page.getByTestId("selection-status");
     await page.getByRole("button", { name: "Measure" }).click();
@@ -552,39 +579,92 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(status).toHaveText("選択: 1件 (persistent:interior-line)");
   });
 
+  test("可視strokeを別layerの見えない選択余白より優先し、余白単独なら選択できる", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
+    test.setTimeout(120_000);
+    await gotoApp(page);
+    await clearFeatures(page);
+    const canvas = page.getByTestId("drawing-canvas");
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("drawing canvas bounding box was not available");
+    const frontLayer: GeoJSONLayer = {
+      id: "front-layer",
+      name: "Front",
+      visible: true,
+      order: 0,
+      createdAt: "2026-09-22T00:00:00.000Z",
+    };
+    const backLayer: GeoJSONLayer = {
+      id: "back-layer",
+      name: "Back",
+      visible: true,
+      order: 1,
+      createdAt: "2026-09-22T00:00:01.000Z",
+    };
+    await importFeatures(
+      page,
+      [
+        lineFeature(
+          "front-halo-line",
+          [
+            [100, 200],
+            [300, 200],
+          ],
+          4,
+          frontLayer.id
+        ),
+        lineFeature(
+          "back-visible-line",
+          [
+            [100, 210],
+            [300, 210],
+          ],
+          4,
+          backLayer.id
+        ),
+      ],
+      { fileName: "cross-layer-selection-halo.geojson", layers: [frontLayer, backLayer] }
+    );
+
+    const status = page.getByTestId("selection-status");
+    await page.getByRole("button", { name: "Measure" }).click();
+    await page.mouse.click(box.x + 200, box.y + 200);
+    await expect(status).toHaveText("選択: 1件 (persistent:front-halo-line)");
+
+    // 10px from the selected front stroke is outside its 8px painted outline,
+    // but inside its 14px accessibility halo. The visibly painted back stroke wins.
+    await page.mouse.click(box.x + 200, box.y + 210);
+    await expect(status).toHaveText("選択: 1件 (persistent:back-visible-line)");
+
+    // With no painted candidate at this point, the now-selected back stroke's
+    // 14px halo remains available as the accessibility fallback.
+    await page.mouse.click(box.x + 200, box.y + 224);
+    await expect(status).toHaveText("選択: 1件 (persistent:back-visible-line)");
+  });
+
   test("選択で拡張された太線の可視外縁をクリックしても選択を維持する", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     await expect(page.locator(".layer-item__count")).toHaveText("0");
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
-    await page.locator("#geojson-file-input").setInputFiles({
-      name: "selected-wide-line.geojson",
-      mimeType: "application/geo+json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              id: "selected-wide-line",
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [100, 200],
-                  [300, 200],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#222222", strokeWidth: 40 }, layerId: "default" },
-            },
+    await importFeatures(
+      page,
+      [
+        lineFeature(
+          "selected-wide-line",
+          [
+            [100, 200],
+            [300, 200],
           ],
-        })
-      ),
-    });
+          40
+        ),
+      ],
+      { fileName: "selected-wide-line.geojson" }
+    );
     await expect(page.locator(".layer-item__count")).toHaveText("1");
     await page.getByRole("button", { name: "Measure" }).click();
     const status = page.getByTestId("selection-status");
@@ -601,34 +681,24 @@ test.describe("TASK-2.2 feature selection", () => {
     test.skip(testInfo.project.name !== "chromium-desktop", "Selection coordinates target a PC-sized viewport");
     test.setTimeout(120_000);
     await gotoApp(page);
-    await page.getByRole("button", { name: "Clear" }).click();
+    await clearFeatures(page);
     const canvas = page.getByTestId("drawing-canvas");
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
-    await page.locator("#geojson-file-input").setInputFiles({
-      name: "selection-zoom-out.geojson",
-      mimeType: "application/geo+json",
-      buffer: Buffer.from(
-        JSON.stringify({
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              id: "zoom-target",
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [100, 200],
-                  [300, 200],
-                ],
-              },
-              properties: {},
-              workbench: { style: { strokeColor: "#222222", strokeWidth: 8 }, layerId: "default" },
-            },
+    await importFeatures(
+      page,
+      [
+        lineFeature(
+          "zoom-target",
+          [
+            [100, 200],
+            [300, 200],
           ],
-        })
-      ),
-    });
+          8
+        ),
+      ],
+      { fileName: "selection-zoom-out.geojson" }
+    );
     await expect(page.locator(".layer-item__count")).toHaveText("1");
     await page.getByRole("button", { name: "Measure" }).click();
     await page.mouse.click(box.x + 200, box.y + 200);

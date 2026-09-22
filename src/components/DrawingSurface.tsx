@@ -7,13 +7,13 @@ import {
   getPolygonArea,
   getPolygonPerimeter,
   getPolylineLength,
-  isPointInPolygon,
   isPolygonCloseCandidate,
   type Point2D,
 } from "../lib/geometry";
 import { pointerToModelPixel } from "../lib/canvasCoordinates";
-import { drawingOverlayOrder, renderOrderFor, transparentGeometryMaterial } from "../lib/renderOrder";
-import { persistentSelection, selectionIdentityKey, type SelectionIdentity } from "../lib/selection";
+import { drawingOverlayOrder, transparentGeometryMaterial } from "../lib/renderOrder";
+import { selectionIdentityKey, type SelectionIdentity } from "../lib/selection";
+import { resolveStrokeHit } from "../lib/hitTesting";
 import type { RenderableStroke } from "../domain/renderableStroke";
 
 interface DrawingSurfaceProps {
@@ -27,14 +27,6 @@ interface DrawingSurfaceProps {
   selection?: SelectionIdentity[];
   onSelectStroke?: (stroke: RenderableStroke, additive: boolean) => void;
 }
-
-const segmentDistance = (point: Point2D, start: Point2D, end: Point2D): number => {
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  if (dx === 0 && dy === 0) return Math.hypot(point[0] - start[0], point[1] - start[1]);
-  const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(point[0] - (start[0] + t * dx), point[1] - (start[1] + t * dy));
-};
 
 export function DrawingSurface({
   onFinish,
@@ -90,16 +82,12 @@ export function DrawingSurface({
     [size.height, size.width, viewport.height, viewport.width]
   );
 
-  // The orthographic camera exposes a larger world area when zoomed out. Keep
-  // the transparent hit plane covering that entire visible area so clicks in
-  // the newly visible outer region still clear selection and can be measured.
-  const planeArgs = useMemo<[number, number]>(
-    () => [viewport.width / Math.max(camera.zoom, 0.01), viewport.height / Math.max(camera.zoom, 0.01)],
-    [camera.zoom, viewport.height, viewport.width]
-  );
-
   useFrame(() => {
-    interactionPlaneRef.current?.position.set(camera.position.x, camera.position.y, -0.001);
+    const plane = interactionPlaneRef.current;
+    if (!plane) return;
+    plane.position.set(camera.position.x, camera.position.y, -0.001);
+    const zoom = Math.max(camera.zoom, 0.01);
+    plane.scale.set(1 / zoom, 1 / zoom, 1);
   });
 
   const finishStroke = useCallback(async () => {
@@ -138,50 +126,7 @@ export function DrawingSurface({
   const handleSelection = (e: ThreeEvent<MouseEvent>) => {
     if (!enabled) {
       const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
-      const candidates = selectableStrokes.flatMap((stroke, strokeIndex) => {
-        const points = stroke.geomType === "polygon" ? [...stroke.ptsPx, stroke.ptsPx[0]] : stroke.ptsPx;
-        const inside = stroke.geomType === "polygon" && isPointInPolygon(pointPx, stroke.ptsPx);
-        let edgeDistance = Infinity;
-        for (let index = 0; index < points.length - 1; index += 1) {
-          edgeDistance = Math.min(edgeDistance, segmentDistance(pointPx, points[index], points[index + 1]));
-        }
-        const order = stroke.renderOrder ?? 0;
-        const selected = selectedKeys.has(
-          selectionIdentityKey(stroke.selectionIdentity ?? persistentSelection(stroke.id))
-        );
-        // Scene widens a selected outline by 4px, so include that visible
-        // width when resolving clicks on the highlighted boundary.
-        const visibleWidth = selected ? stroke.width + 4 : stroke.width;
-        const tolerance = Math.max(14, visibleWidth / 2) / Math.max(camera.zoom, 0.01);
-        const hits: { stroke: RenderableStroke; distance: number; renderOrder: number; strokeIndex: number }[] = [];
-        if (inside)
-          hits.push({
-            stroke,
-            distance: 0,
-            renderOrder: renderOrderFor(order, "fill"),
-            strokeIndex,
-          });
-        if (edgeDistance <= tolerance) {
-          hits.push({
-            stroke,
-            distance: edgeDistance,
-            renderOrder: renderOrderFor(order, selected ? "handle" : "outline"),
-            strokeIndex,
-          });
-        }
-        return hits;
-      });
-      const hit = candidates.reduce<(typeof candidates)[number] | null>((nearest, candidate) => {
-        if (
-          !nearest ||
-          candidate.renderOrder > nearest.renderOrder ||
-          (candidate.renderOrder === nearest.renderOrder &&
-            (candidate.distance < nearest.distance ||
-              (candidate.distance === nearest.distance && candidate.strokeIndex >= nearest.strokeIndex)))
-        )
-          return candidate;
-        return nearest;
-      }, null);
+      const hit = resolveStrokeHit(pointPx, selectableStrokes, selectedKeys, camera.zoom);
       if (hit && onSelectStroke) {
         e.stopPropagation();
         onSelectStroke(
@@ -300,7 +245,7 @@ export function DrawingSurface({
         onDoubleClick={onDoubleClick}
         onPointerMove={onPointerMove}
       >
-        <planeGeometry args={planeArgs} />
+        <planeGeometry args={[viewport.width, viewport.height]} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
     </group>

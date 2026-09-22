@@ -4,6 +4,7 @@ import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
 import type { RenderableStroke } from "../domain/renderableStroke";
 import { getCentroid } from "../lib/geometry";
+import { getStrokePresentation } from "../lib/hitTesting";
 import { renderOrderFor, transparentGeometryMaterial } from "../lib/renderOrder";
 import { persistentSelection, selectionIdentityKey, type SelectionIdentity } from "../lib/selection";
 
@@ -31,6 +32,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false, 
       const points = ptsPx.map(([x, y]) => pxToWorld(x, y));
       const isRenderable = points.length >= 2;
       const isPolygon = s.geomType === "polygon" && points.length >= 3;
+      const selected = selectedKeys.has(selectionIdentityKey(s.selectionIdentity ?? persistentSelection(s.id)));
       const shape = isPolygon ? new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y))) : undefined;
       const centroidWorld = pxToWorld(...getCentroid(ptsPx));
       const measurementPosition = isPolygon
@@ -41,7 +43,8 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false, 
         renderOrder,
         isRenderable,
         selectionIdentity: s.selectionIdentity ?? persistentSelection(s.id),
-        selected: selectedKeys.has(selectionIdentityKey(s.selectionIdentity ?? persistentSelection(s.id))),
+        selected,
+        presentation: getStrokePresentation(s.width, selected),
         points: isPolygon ? [...points, points[0]] : points,
         shape,
         measurementPosition,
@@ -70,7 +73,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false, 
                 <Line
                   points={s.points}
                   color={s.selected ? "#2563eb" : s.color}
-                  lineWidth={s.selected ? s.width + 4 : s.width}
+                  lineWidth={s.presentation.outlineWidth}
                   renderOrder={renderOrderFor(s.renderOrder, "outline")}
                   {...transparentGeometryMaterial}
                 />
@@ -78,7 +81,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false, 
                   <Line
                     points={s.points}
                     color="#2563eb"
-                    lineWidth={Math.max(1, s.width + 2)}
+                    lineWidth={s.presentation.handleWidth}
                     renderOrder={renderOrderFor(s.renderOrder, "handle")}
                     {...transparentGeometryMaterial}
                   />
