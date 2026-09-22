@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SQL_EXAMPLES, type useQueryWorkbench } from "../hooks/useQueryWorkbench";
 import type { QueryPromotionResult } from "../hooks/useGeometryFeatures";
+import { sameSelectionIdentity, type SelectionIdentity } from "../lib/selection";
 
 const displayValue = (value: unknown) =>
   value === null ? "NULL" : typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -8,9 +9,15 @@ const displayValue = (value: unknown) =>
 export function SqlWorkbench({
   query,
   onPromote,
+  selection,
+  selectable,
+  onSelect,
 }: {
   query: ReturnType<typeof useQueryWorkbench>;
   onPromote: (layerName: string) => Promise<QueryPromotionResult>;
+  selection: SelectionIdentity[];
+  selectable: boolean;
+  onSelect: (identity: SelectionIdentity, additive: boolean) => void;
 }) {
   const renderedRowIndexes = new Set(query.temporaryStrokes.map(({ id }) => Number(id.replace("query-result-", ""))));
   const [layerName, setLayerName] = useState("Query result");
@@ -122,13 +129,38 @@ export function SqlWorkbench({
                 </tr>
               </thead>
               <tbody>
-                {query.result.rows.map((row, index) => (
-                  <tr key={index} data-query-geometry={renderedRowIndexes.has(index) ? "rendered" : undefined}>
-                    {query.result!.columns.map((column) => (
-                      <td key={column.name}>{displayValue(row[column.name])}</td>
-                    ))}
-                  </tr>
-                ))}
+                {query.result.rows.map((row, index) => {
+                  const identity = query.selectionByRow.get(index);
+                  const selected = identity ? selection.some((entry) => sameSelectionIdentity(entry, identity)) : false;
+                  const selectRow = (additive: boolean) => {
+                    if (!selectable || !identity) return;
+                    onSelect(identity, additive);
+                  };
+                  return (
+                    <tr
+                      key={index}
+                      data-query-geometry={renderedRowIndexes.has(index) ? "rendered" : undefined}
+                      data-query-selection={identity?.kind}
+                      data-selected={selected ? "true" : undefined}
+                      aria-selected={identity ? selected : undefined}
+                      tabIndex={selectable && identity ? 0 : -1}
+                      onClick={(event) => {
+                        if (!selectable || !identity) return;
+                        onSelect(identity, event.ctrlKey || event.metaKey);
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && selectable && identity) {
+                          event.preventDefault();
+                          selectRow(event.ctrlKey || event.metaKey);
+                        }
+                      }}
+                    >
+                      {query.result!.columns.map((column) => (
+                        <td key={column.name}>{displayValue(row[column.name])}</td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

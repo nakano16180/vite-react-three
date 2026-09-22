@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Header } from "./components/Header";
 import { Scene } from "./components/Scene";
@@ -12,6 +12,7 @@ import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeat
 import type { Point2D } from "./domain/geometryFeature";
 import { useQueryWorkbench } from "./hooks/useQueryWorkbench";
 import { drawingRenderRank } from "./lib/renderOrder";
+import { describeSelection, reconcileSelection, toggleSelection, type SelectionIdentity } from "./lib/selection";
 
 type InteractionMode = "draw" | "pan" | "edit" | "measure";
 
@@ -27,6 +28,10 @@ interface WorkspaceProps {
   drawingRank: number;
   onFinishStroke: ReturnType<typeof useGeometryFeatures>["persistStroke"];
   onUpdateStroke: (strokeId: string, newPtsPx: Point2D[]) => Promise<void>;
+  selection: SelectionIdentity[];
+  selectable: boolean;
+  onSelect: (identity: SelectionIdentity, additive: boolean) => void;
+  onClearSelection: () => void;
 }
 
 function Workspace({
@@ -41,6 +46,10 @@ function Workspace({
   drawingRank,
   onFinishStroke,
   onUpdateStroke,
+  selection,
+  selectable,
+  onSelect,
+  onClearSelection,
 }: WorkspaceProps) {
   return (
     <main data-testid="workspace" style={{ flex: 1, padding: 12, minHeight: 0 }}>
@@ -60,6 +69,7 @@ function Workspace({
               strokes={[...strokes, ...temporaryStrokes]}
               hideStrokes={interactionMode === "edit"}
               showMeasurements={interactionMode === "measure"}
+              selection={selection}
             />
             <StrokeEditor strokes={strokes} onUpdateStroke={onUpdateStroke} enabled={interactionMode === "edit"} />
             <DrawingSurface
@@ -68,6 +78,15 @@ function Workspace({
               width={strokeWidth}
               enabled={interactionMode === "draw"}
               drawingRank={drawingRank}
+              selection={selection}
+              onCanvasClick={selectable ? onClearSelection : undefined}
+              selectableStrokes={selectable ? [...strokes, ...temporaryStrokes] : undefined}
+              onSelectStroke={
+                selectable
+                  ? (stroke, additive) =>
+                      onSelect(stroke.selectionIdentity ?? { kind: "persistent", featureId: stroke.id }, additive)
+                  : undefined
+              }
             />
           </Canvas>
         </div>
@@ -118,12 +137,21 @@ function Workspace({
   );
 }
 
-function StatusFooter({ storageStatus }: { storageStatus: StorageStatus }) {
+function SelectionStatus({ selection }: { selection: SelectionIdentity[] }) {
+  return (
+    <div data-testid="selection-status" role="status" aria-live="polite">
+      選択: {selection.length}件{selection.length > 0 && ` (${selection.map(describeSelection).join(", ")})`}
+    </div>
+  );
+}
+
+function StatusFooter({ storageStatus, selection }: { storageStatus: StorageStatus; selection: SelectionIdentity[] }) {
   const storageLabel = storageStatus.opfs ? "OPFS" : "メモリ";
   const engineLabel = storageStatus.store === "spatial" ? "Spatial" : "JSON fallback";
   const persistenceLabel = storageStatus.opfs ? "永続ストレージ" : "一時ストレージ";
   return (
     <footer data-testid="status-footer" style={{ padding: 8, fontSize: 12, color: "#666", textAlign: "right" }}>
+      <SelectionStatus selection={selection} />
       <span data-testid="storage-status" style={{ color: storageStatus.opfs ? "#16a34a" : "#b45309", marginRight: 8 }}>
         {persistenceLabel}: {storageLabel} / {engineLabel}
       </span>
@@ -162,6 +190,18 @@ export default function App() {
     updateStroke,
   } = useGeometryFeatures(strokeColor, strokeWidth, simplifyOn);
   const query = useQueryWorkbench(features, layers, loading);
+  const [selection, setSelection] = useState<SelectionIdentity[]>([]);
+  const persistentFeatureIds = useMemo(() => new Set(features.map(({ id }) => id)), [features]);
+
+  useEffect(() => {
+    setSelection((current) => reconcileSelection(current, persistentFeatureIds, query.selectionKeys));
+  }, [persistentFeatureIds, query.selectionKeys]);
+
+  const onSelect = useCallback((identity: SelectionIdentity, additive: boolean) => {
+    setSelection((current) => toggleSelection(current, identity, additive));
+  }, []);
+  const onClearSelection = useCallback(() => setSelection([]), []);
+  const selectable = interactionMode === "measure";
 
   return (
     <div
@@ -215,16 +255,23 @@ export default function App() {
           drawingRank={drawingRenderRank(layers.length)}
           onFinishStroke={persistStroke}
           onUpdateStroke={updateStroke}
+          selection={selection}
+          selectable={selectable}
+          onSelect={onSelect}
+          onClearSelection={onClearSelection}
         />
         <SqlWorkbench
           query={query}
+          selection={selection}
+          selectable={selectable}
+          onSelect={onSelect}
           onPromote={(layerName) =>
             query.result ? promoteQueryResult(query.result, layerName) : Promise.resolve({ status: "empty" as const })
           }
         />
       </div>
 
-      <StatusFooter storageStatus={storageStatus} />
+      <StatusFooter storageStatus={storageStatus} selection={selection} />
     </div>
   );
 }

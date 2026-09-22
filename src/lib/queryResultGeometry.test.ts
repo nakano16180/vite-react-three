@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QueryResult } from "../db/queryRuntime";
-import { queryResultFeatures, queryResultStrokes } from "./queryResultGeometry";
+import { queryResultFeatures, queryResultSelectionIdentities, queryResultStrokes } from "./queryResultGeometry";
+import { selectionIdentityKey } from "./selection";
 
 const result = (values: unknown[]): QueryResult => ({
   status: "success",
@@ -82,5 +83,52 @@ describe("query result geometry", () => {
       layerId: "analysis-layer",
     });
     expect(first.id).not.toBe(second.id);
+  });
+
+  it("canonical idを持つgeometry rowはpersistent、idなしはqueryごとのtemporary identityになる", () => {
+    const queryResult: QueryResult = {
+      ...result([
+        '{"type":"LineString","coordinates":[[0,0],[2,2]]}',
+        '{"type":"LineString","coordinates":[[2,0],[4,2]]}',
+      ]),
+      columns: [
+        { name: "id", type: "VARCHAR" },
+        { name: "geometry_geojson", type: "VARCHAR", geometryRole: "geojson" },
+      ],
+      rows: [
+        { id: "feature-1", geometry_geojson: '{"type":"LineString","coordinates":[[0,0],[2,2]]}' },
+        { id: "unknown", geometry_geojson: '{"type":"LineString","coordinates":[[2,0],[4,2]]}' },
+      ],
+    };
+    const identities = queryResultSelectionIdentities(queryResult, "query-4", new Set(["feature-1"]));
+    expect(selectionIdentityKey(identities.get(0)!)).toBe("persistent:feature-1");
+    expect(selectionIdentityKey(identities.get(1)!)).toBe("temporary:query-4:1");
+
+    const strokes = queryResultStrokes(queryResult, {
+      temporaryQueryKey: "query-4",
+      persistentFeatureIds: new Set(["feature-1"]),
+    });
+    expect(strokes.map((stroke) => stroke.selectionIdentity && selectionIdentityKey(stroke.selectionIdentity))).toEqual(
+      ["persistent:feature-1", "temporary:query-4:1"]
+    );
+  });
+
+  it("geometryなしでも既存featureのcanonical id rowをpersistent identityにする", () => {
+    const queryResult: QueryResult = {
+      status: "success",
+      columns: [
+        { name: "id", type: "VARCHAR" },
+        { name: "geometry_geojson", type: "VARCHAR", geometryRole: "geojson" },
+      ],
+      rows: [
+        { id: "feature-1", geometry_geojson: null },
+        { id: "feature-2", geometry_geojson: '{"type":"LineString","coordinates":[[0,0],[2,2]]}' },
+      ],
+      rowCount: 2,
+      truncated: false,
+    };
+    const identities = queryResultSelectionIdentities(queryResult, "query-5", new Set(["feature-1", "feature-2"]));
+    expect(selectionIdentityKey(identities.get(0)!)).toBe("persistent:feature-1");
+    expect(selectionIdentityKey(identities.get(1)!)).toBe("persistent:feature-2");
   });
 });

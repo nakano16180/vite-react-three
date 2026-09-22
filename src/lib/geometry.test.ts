@@ -4,6 +4,7 @@ import {
   getPolygonArea,
   getPolygonPerimeter,
   getPolylineLength,
+  isPointInPolygon,
   isPolygonCloseCandidate,
 } from "./geometry";
 
@@ -61,5 +62,17 @@ describe("geometry helpers", () => {
         5
       )
     ).toBe(false);
+  });
+
+  it("polygonの内部と境界を含み、外部を除外する", () => {
+    const polygon: [number, number][] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ];
+    expect(isPointInPolygon([5, 5], polygon)).toBe(true);
+    expect(isPointInPolygon([0, 5], polygon)).toBe(true);
+    expect(isPointInPolygon([15, 5], polygon)).toBe(false);
   });
 });

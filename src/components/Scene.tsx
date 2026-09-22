@@ -4,16 +4,20 @@ import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
 import type { RenderableStroke } from "../domain/renderableStroke";
 import { getCentroid } from "../lib/geometry";
+import { getStrokePresentation } from "../lib/hitTesting";
 import { renderOrderFor, transparentGeometryMaterial } from "../lib/renderOrder";
+import { persistentSelection, selectionIdentityKey, type SelectionIdentity } from "../lib/selection";
 
 interface SceneProps {
   strokes: RenderableStroke[];
   hideStrokes?: boolean;
   showMeasurements?: boolean;
+  selection: SelectionIdentity[];
 }
 
-export function Scene({ strokes, hideStrokes = false, showMeasurements = false }: SceneProps) {
+export function Scene({ strokes, hideStrokes = false, showMeasurements = false, selection }: SceneProps) {
   const { size, viewport } = useThree();
+  const selectedKeys = useMemo(() => new Set(selection.map(selectionIdentityKey)), [selection]);
 
   const renderedStrokes = useMemo(() => {
     const pxToWorld = (x: number, y: number): [number, number, number] => {
@@ -28,6 +32,7 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
       const points = ptsPx.map(([x, y]) => pxToWorld(x, y));
       const isRenderable = points.length >= 2;
       const isPolygon = s.geomType === "polygon" && points.length >= 3;
+      const selected = selectedKeys.has(selectionIdentityKey(s.selectionIdentity ?? persistentSelection(s.id)));
       const shape = isPolygon ? new THREE.Shape(points.map(([x, y]) => new THREE.Vector2(x, y))) : undefined;
       const centroidWorld = pxToWorld(...getCentroid(ptsPx));
       const measurementPosition = isPolygon
@@ -37,12 +42,15 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
         ...s,
         renderOrder,
         isRenderable,
+        selectionIdentity: s.selectionIdentity ?? persistentSelection(s.id),
+        selected,
+        presentation: getStrokePresentation(s.width, selected),
         points: isPolygon ? [...points, points[0]] : points,
         shape,
         measurementPosition,
       };
     });
-  }, [strokes, size, viewport]);
+  }, [selectedKeys, size, strokes, viewport]);
 
   return (
     <group>
@@ -55,20 +63,29 @@ export function Scene({ strokes, hideStrokes = false, showMeasurements = false }
                   <mesh position={[0, 0, -0.001]} renderOrder={renderOrderFor(s.renderOrder, "fill")}>
                     <shapeGeometry args={[s.shape]} />
                     <meshBasicMaterial
-                      color={s.color}
+                      color={s.selected ? "#2563eb" : s.color}
                       {...transparentGeometryMaterial}
-                      opacity={0.25}
+                      opacity={s.selected ? 0.38 : 0.25}
                       side={THREE.DoubleSide}
                     />
                   </mesh>
                 )}
                 <Line
                   points={s.points}
-                  color={s.color}
-                  lineWidth={s.width}
+                  color={s.selected ? "#2563eb" : s.color}
+                  lineWidth={s.presentation.outlineWidth}
                   renderOrder={renderOrderFor(s.renderOrder, "outline")}
                   {...transparentGeometryMaterial}
                 />
+                {s.selected && (
+                  <Line
+                    points={s.points}
+                    color="#2563eb"
+                    lineWidth={s.presentation.handleWidth}
+                    renderOrder={renderOrderFor(s.renderOrder, "handle")}
+                    {...transparentGeometryMaterial}
+                  />
+                )}
                 {showMeasurements && s.measurementPosition && (
                   <Html position={s.measurementPosition} center style={{ pointerEvents: "none" }}>
                     <div

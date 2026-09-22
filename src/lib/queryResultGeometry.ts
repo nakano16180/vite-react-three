@@ -8,6 +8,7 @@ import {
   type Point2D,
 } from "../domain/geometryFeature";
 import { toRenderableStroke, type RenderableStroke } from "../domain/renderableStroke";
+import { persistentSelection, temporarySelection, type SelectionIdentity } from "./selection";
 
 export const QUERY_RESULT_STYLE = {
   strokeColor: "#ec4899",
@@ -53,11 +54,16 @@ export interface QueryResultGeometry {
   rowIndex: number;
   geometry: FeatureGeometry;
   properties: Record<string, JsonValue>;
+  featureId?: string;
 }
+
+const featureIdColumn = (result: QueryResult): string | undefined =>
+  result.columns.find((column) => column.name.toLowerCase() === "id")?.name;
 
 export const queryResultGeometries = (result: QueryResult): QueryResultGeometry[] => {
   const geometryColumn = result.columns.find((column) => column.geometryRole === "geojson");
   if (!geometryColumn) return [];
+  const idColumn = featureIdColumn(result);
   return result.rows.flatMap((row, rowIndex) => {
     const geometry = parseGeometry(row[geometryColumn.name]);
     if (!geometry) return [];
@@ -66,7 +72,8 @@ export const queryResultGeometries = (result: QueryResult): QueryResultGeometry[
         .filter((column) => column.name !== geometryColumn.name)
         .map((column) => [column.name, toJsonValue(row[column.name])])
     );
-    return [{ rowIndex, geometry, properties }];
+    const featureId = idColumn && typeof row[idColumn] === "string" ? row[idColumn] : undefined;
+    return [{ rowIndex, geometry, properties, ...(featureId ? { featureId } : {}) }];
   });
 };
 
@@ -80,17 +87,54 @@ export const queryResultFeatures = (result: QueryResult, layerId: string): Geome
     })
   );
 
-export const queryResultStrokes = (result: QueryResult, renderOrder?: number): RenderableStroke[] => {
-  return queryResultGeometries(result).map(({ rowIndex, geometry, properties }) =>
-    toRenderableStroke(
-      createGeometryFeature({
-        id: `query-result-${rowIndex}`,
-        geometry,
-        properties,
-        style: QUERY_RESULT_STYLE,
-        layerId: "__query_result__",
-      }),
-      renderOrder
-    )
+interface QueryResultStrokeOptions {
+  renderOrder?: number;
+  temporaryQueryKey?: string;
+  persistentFeatureIds?: ReadonlySet<string>;
+}
+
+const normalizeStrokeOptions = (options?: number | QueryResultStrokeOptions): QueryResultStrokeOptions =>
+  typeof options === "number" ? { renderOrder: options } : (options ?? {});
+
+export const queryResultSelectionIdentities = (
+  result: QueryResult,
+  queryKey: string,
+  persistentFeatureIds: ReadonlySet<string>
+): Map<number, SelectionIdentity> => {
+  const identities = new Map<number, SelectionIdentity>();
+  const geometryRows = new Set(queryResultGeometries(result).map(({ rowIndex }) => rowIndex));
+  const idColumn = featureIdColumn(result);
+  for (const [rowIndex, row] of result.rows.entries()) {
+    const featureId = idColumn && typeof row[idColumn] === "string" ? row[idColumn] : undefined;
+    if (featureId && persistentFeatureIds.has(featureId)) identities.set(rowIndex, persistentSelection(featureId));
+    else if (geometryRows.has(rowIndex)) identities.set(rowIndex, temporarySelection(queryKey, rowIndex));
+  }
+  return identities;
+};
+
+export const queryResultStrokes = (
+  result: QueryResult,
+  options?: number | QueryResultStrokeOptions
+): RenderableStroke[] => {
+  const normalized = normalizeStrokeOptions(options);
+  return queryResultGeometries(result).map(({ rowIndex, geometry, properties, featureId }) =>
+    (() => {
+      const stroke = toRenderableStroke(
+        createGeometryFeature({
+          id: `query-result-${rowIndex}`,
+          geometry,
+          properties,
+          style: QUERY_RESULT_STYLE,
+          layerId: "__query_result__",
+        }),
+        normalized.renderOrder
+      );
+      if (!normalized.temporaryQueryKey) return stroke;
+      const identity =
+        featureId && normalized.persistentFeatureIds?.has(featureId)
+          ? persistentSelection(featureId)
+          : temporarySelection(normalized.temporaryQueryKey, rowIndex);
+      return { ...stroke, selectionIdentity: identity };
+    })()
   );
 };

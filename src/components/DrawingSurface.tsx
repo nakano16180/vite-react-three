@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
+import type { ThreeEvent } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
 import type { Mesh } from "three";
 import {
@@ -11,6 +12,9 @@ import {
 } from "../lib/geometry";
 import { pointerToModelPixel } from "../lib/canvasCoordinates";
 import { drawingOverlayOrder, transparentGeometryMaterial } from "../lib/renderOrder";
+import { selectionIdentityKey, type SelectionIdentity } from "../lib/selection";
+import { resolveStrokeHit } from "../lib/hitTesting";
+import type { RenderableStroke } from "../domain/renderableStroke";
 
 interface DrawingSurfaceProps {
   onFinish: (ptsPx: Point2D[], type: "line" | "polygon") => void | Promise<void>;
@@ -18,14 +22,47 @@ interface DrawingSurfaceProps {
   width: number;
   enabled: boolean;
   drawingRank: number;
+  onCanvasClick?: (additive: boolean) => void;
+  selectableStrokes?: RenderableStroke[];
+  selection?: SelectionIdentity[];
+  onSelectStroke?: (stroke: RenderableStroke, additive: boolean) => void;
 }
 
-export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }: DrawingSurfaceProps) {
+export function DrawingSurface({
+  onFinish,
+  color,
+  width,
+  enabled,
+  drawingRank,
+  onCanvasClick,
+  selectableStrokes = [],
+  selection = [],
+  onSelectStroke,
+}: DrawingSurfaceProps) {
   const { camera, size, viewport } = useThree();
   const [currentPtsWorld, setCurrentPtsWorld] = useState<[number, number, number][]>([]);
   const [hoverWorld, setHoverWorld] = useState<[number, number, number] | null>(null);
   const currentPtsPxRef = useRef<Point2D[]>([]);
   const interactionPlaneRef = useRef<Mesh>(null);
+  const modifierRef = useRef(false);
+  const selectedKeys = useMemo(() => new Set(selection.map(selectionIdentityKey)), [selection]);
+
+  useEffect(() => {
+    const updateModifier = (event: KeyboardEvent) => {
+      modifierRef.current = event.ctrlKey || event.metaKey;
+    };
+    const clearModifier = () => {
+      modifierRef.current = false;
+    };
+    window.addEventListener("keydown", updateModifier);
+    window.addEventListener("keyup", updateModifier);
+    window.addEventListener("blur", clearModifier);
+    return () => {
+      window.removeEventListener("keydown", updateModifier);
+      window.removeEventListener("keyup", updateModifier);
+      window.removeEventListener("blur", clearModifier);
+    };
+  }, []);
 
   const worldToPx = useCallback(
     (wx: number, wy: number): Point2D => {
@@ -45,10 +82,12 @@ export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }:
     [size.height, size.width, viewport.height, viewport.width]
   );
 
-  const planeArgs = useMemo<[number, number]>(() => [viewport.width, viewport.height], [viewport]);
-
   useFrame(() => {
-    interactionPlaneRef.current?.position.set(camera.position.x, camera.position.y, -0.001);
+    const plane = interactionPlaneRef.current;
+    if (!plane) return;
+    plane.position.set(camera.position.x, camera.position.y, -0.001);
+    const zoom = Math.max(camera.zoom, 0.01);
+    plane.scale.set(1 / zoom, 1 / zoom, 1);
   });
 
   const finishStroke = useCallback(async () => {
@@ -84,8 +123,28 @@ export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }:
     setHoverWorld(null);
   }, [enabled]);
 
-  const onClick = (e: { stopPropagation: () => void; pointer: { x: number; y: number } }) => {
-    if (!enabled) return;
+  const handleSelection = (e: ThreeEvent<MouseEvent>) => {
+    if (!enabled) {
+      const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
+      const hit = resolveStrokeHit(pointPx, selectableStrokes, selectedKeys, camera.zoom);
+      if (hit && onSelectStroke) {
+        e.stopPropagation();
+        onSelectStroke(
+          hit.stroke,
+          modifierRef.current || e.ctrlKey || e.metaKey || e.nativeEvent.ctrlKey || e.nativeEvent.metaKey
+        );
+      } else if (onCanvasClick) {
+        e.stopPropagation();
+        onCanvasClick(modifierRef.current || e.ctrlKey || e.metaKey || e.nativeEvent.ctrlKey || e.nativeEvent.metaKey);
+      }
+    }
+  };
+
+  const onClick = (e: ThreeEvent<MouseEvent>) => {
+    if (!enabled) {
+      handleSelection(e);
+      return;
+    }
     e.stopPropagation();
     const pointPx = pointerToModelPixel(e.pointer, size, viewport, camera.position, camera.zoom);
     const nextWorld = pxToWorld(pointPx[0], pointPx[1]);
@@ -186,7 +245,7 @@ export function DrawingSurface({ onFinish, color, width, enabled, drawingRank }:
         onDoubleClick={onDoubleClick}
         onPointerMove={onPointerMove}
       >
-        <planeGeometry args={planeArgs} />
+        <planeGeometry args={[viewport.width, viewport.height]} />
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
     </group>
