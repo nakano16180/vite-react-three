@@ -6,6 +6,7 @@ import {
   createGeometryFeature,
   type FeatureGeometry,
   type GeometryFeature,
+  type JsonValue,
   type Layer,
   type Point2D,
 } from "../domain/geometryFeature";
@@ -239,6 +240,12 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     [features, runRepositoryAction]
   );
 
+  const updateFeatureProperties = useCallback(
+    (id: string, properties: Record<string, JsonValue>) =>
+      runRepositoryAction((repository) => repository.updateProperties(id, properties)),
+    [runRepositoryAction]
+  );
+
   const handleImportGeoJSON = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -334,6 +341,7 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     deleteLayer,
     promoteQueryResult,
     updateStroke,
+    updateFeatureProperties,
     handleUndo,
     handleClear,
     handleRefresh,

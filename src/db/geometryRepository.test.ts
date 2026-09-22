@@ -160,6 +160,33 @@ describe("geometry repository store parity", () => {
     }
   });
 
+  it.each(["spatial", "json"] as const)(
+    "%s updatePropertiesはJSON-safe propertiesを同じ形式で保存する",
+    async (store) => {
+      const updateQuery = vi.fn().mockResolvedValue(result());
+      const prepare = vi.fn(async (sql: string) => ({
+        query: sql.startsWith("SELECT 1 AS present")
+          ? vi.fn().mockResolvedValue(result([{ present: 1 }]))
+          : updateQuery,
+        close: vi.fn().mockResolvedValue(undefined),
+      }));
+      const repository = new GeometryRepository({ prepare } as unknown as AsyncDuckDBConnection, {
+        opfs: false,
+        spatial: store === "spatial",
+        store,
+      });
+      const properties = { label: "updated", count: 2, nested: { ok: true } } as const;
+
+      await repository.updateProperties("feature-1", properties);
+
+      expect(prepare).toHaveBeenCalledTimes(2);
+      expect(prepare.mock.calls[1][0]).toContain(
+        store === "spatial" ? "UPDATE features SET properties" : "UPDATE features_json SET properties"
+      );
+      expect(updateQuery).toHaveBeenCalledWith(JSON.stringify(properties), "feature-1");
+    }
+  );
+
   it("rollback失敗時も元のmigration errorをwarningで返す", async () => {
     const prepare = vi.fn(async (sql: string) => ({
       query: vi.fn(async (...args: unknown[]) => {

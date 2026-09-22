@@ -262,10 +262,10 @@ test.describe("drawing workspace", () => {
     await expect(run).toBeEnabled({ timeout: 30_000 });
     await run.click();
     await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
-    await expect(page.getByRole("table")).toContainText("geometry_type");
-    await expect(page.getByRole("table")).toContainText("LineString");
-    await expect(page.getByText("1 rows")).toBeVisible();
-    await expect(page.getByText("Complete result")).toBeVisible();
+    await expect(page.getByTestId("sql-workbench").getByRole("table")).toContainText("geometry_type");
+    await expect(page.getByTestId("sql-workbench").getByRole("table")).toContainText("LineString");
+    await expect(page.getByTestId("sql-workbench").getByText("1 rows")).toBeVisible();
+    await expect(page.getByTestId("sql-workbench").getByText("Complete result")).toBeVisible();
     await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
     await expect(page.locator('tr[data-query-geometry="rendered"]')).toHaveCount(1);
     expect(await exportFeatureCount(page)).toBe(1);
@@ -319,8 +319,8 @@ test.describe("drawing workspace", () => {
     await page.getByRole("button", { name: "Run query" }).click();
 
     await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
-    await expect(page.getByRole("table")).toContainText("constructed-line");
-    await expect(page.getByRole("table")).toContainText("LineString");
+    await expect(page.getByTestId("sql-workbench").getByRole("table")).toContainText("constructed-line");
+    await expect(page.getByTestId("sql-workbench").getByRole("table")).toContainText("LineString");
     await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
     await expect(page.locator('tr[data-query-geometry="rendered"]')).toHaveCount(1);
     expect((await canvas.screenshot()).equals(canvasBeforeQuery)).toBe(false);
@@ -352,8 +352,8 @@ test.describe("drawing workspace", () => {
     await page.getByTestId("sql-editor").fill(sql);
     await page.getByRole("button", { name: "Run query" }).click();
     await expect(page.getByTestId("temporary-result-count")).toHaveText("1 geometries rendered temporarily");
-    await expect(page.getByRole("table")).toContainText("road");
-    await expect(page.getByRole("table")).toContainText("7");
+    await expect(page.getByTestId("sql-workbench").getByRole("table")).toContainText("road");
+    await expect(page.getByTestId("sql-workbench").getByRole("table")).toContainText("7");
     const canvasWithTemporaryResult = await canvas.screenshot();
     expect(canvasWithTemporaryResult.equals(canvasBeforeQuery)).toBe(false);
     await expect(page.getByTestId("query-promotion-duplicate-policy")).toContainText(

@@ -408,7 +408,7 @@ test.describe("TASK-2.2 feature selection", () => {
     await page.mouse.click(secondMidpoint.x, secondMidpoint.y);
     await page.keyboard.up("Control");
     await expect(status).toHaveText(`選択: 1件 (persistent:${firstId})`);
-    await page.mouse.click(box.x + box.width - 30, box.y + box.height - 30);
+    await page.mouse.click(box.x + box.width - 30, box.y + 30);
     await expect(status).toHaveText("選択: 0件");
 
     // 4. Select a canonical SQL result row and verify canvas/status synchronization uses the same persistent identity.
@@ -720,7 +720,7 @@ test.describe("TASK-2.2 feature selection", () => {
       })
       .toBeLessThan(1);
     await page.getByRole("button", { name: "Measure" }).click();
-    await page.mouse.click(box.x + box.width - 4, box.y + box.height - 4);
+    await page.mouse.click(box.x + box.width - 30, box.y + 30);
     await expect(page.getByTestId("selection-status")).toHaveText("選択: 0件");
   });
 });

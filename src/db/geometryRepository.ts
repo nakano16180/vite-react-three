@@ -412,6 +412,18 @@ export class GeometryRepository {
     await this.checkpoint();
   }
 
+  async updateProperties(id: string, properties: Record<string, JsonValue>): Promise<void> {
+    await this.assertFeatureLayerExists(id);
+    const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+    const statement = await this.connection.prepare(`UPDATE ${table} SET properties = CAST(? AS JSON) WHERE id = ?;`);
+    try {
+      await statement.query(JSON.stringify(properties), id);
+    } finally {
+      await statement.close();
+    }
+    await this.checkpoint();
+  }
+
   async deleteLatestFeature(): Promise<void> {
     const table = this.capabilities.store === "spatial" ? "features" : "features_json";
     await this.connection.query(

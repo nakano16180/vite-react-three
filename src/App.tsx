@@ -7,6 +7,7 @@ import { StrokeEditor } from "./components/StrokeEditor";
 import { PanControls } from "./components/PanControls";
 import { SqlWorkbench } from "./components/SqlWorkbench";
 import { LayerPanel } from "./components/LayerPanel";
+import { AttributeTable } from "./components/AttributeTable";
 import type { RenderableStroke } from "./domain/renderableStroke";
 import { useGeometryFeatures, type StorageStatus } from "./hooks/useGeometryFeatures";
 import type { Point2D } from "./domain/geometryFeature";
@@ -188,10 +189,12 @@ export default function App() {
     storageStatus,
     strokes,
     updateStroke,
+    updateFeatureProperties,
   } = useGeometryFeatures(strokeColor, strokeWidth, simplifyOn);
   const query = useQueryWorkbench(features, layers, loading);
   const [selection, setSelection] = useState<SelectionIdentity[]>([]);
   const persistentFeatureIds = useMemo(() => new Set(features.map(({ id }) => id)), [features]);
+  const activeLayer = layers.find(({ id }) => id === activeLayerId);
 
   useEffect(() => {
     setSelection((current) => reconcileSelection(current, persistentFeatureIds, query.selectionKeys));
@@ -243,23 +246,31 @@ export default function App() {
           onReorder={reorderLayers}
           onDelete={deleteLayer}
         />
-        <Workspace
-          interactionMode={interactionMode}
-          loading={loading}
-          operationNotice={operationNotice}
-          storageStatus={storageStatus}
-          strokeColor={strokeColor}
-          strokeWidth={strokeWidth}
-          strokes={strokes}
-          temporaryStrokes={query.temporaryStrokes}
-          drawingRank={drawingRenderRank(layers.length)}
-          onFinishStroke={persistStroke}
-          onUpdateStroke={updateStroke}
-          selection={selection}
-          selectable={selectable}
-          onSelect={onSelect}
-          onClearSelection={onClearSelection}
-        />
+        <div className="workspace-column">
+          <Workspace
+            interactionMode={interactionMode}
+            loading={loading}
+            operationNotice={operationNotice}
+            storageStatus={storageStatus}
+            strokeColor={strokeColor}
+            strokeWidth={strokeWidth}
+            strokes={strokes}
+            temporaryStrokes={query.temporaryStrokes}
+            drawingRank={drawingRenderRank(layers.length)}
+            onFinishStroke={persistStroke}
+            onUpdateStroke={updateStroke}
+            selection={selection}
+            selectable={selectable}
+            onSelect={onSelect}
+            onClearSelection={onClearSelection}
+          />
+          <AttributeTable
+            features={features}
+            activeLayer={activeLayer}
+            disabled={loading}
+            onUpdateProperties={updateFeatureProperties}
+          />
+        </div>
         <SqlWorkbench
           query={query}
           selection={selection}
