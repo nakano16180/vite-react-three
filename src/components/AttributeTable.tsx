@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GeometryFeature, JsonValue, Layer } from "../domain/geometryFeature";
 import type { RepositoryActionStatus } from "../db/geometryRepository";
+import { persistentSelection, selectionIdentityKey, type SelectionIdentity } from "../lib/selection";
 import {
   attributeDisplayValue,
   attributeEditorValue,
@@ -18,6 +19,9 @@ interface AttributeTableProps {
   activeLayer?: Layer;
   disabled: boolean;
   onUpdateProperties: (featureId: string, properties: Record<string, JsonValue>) => Promise<RepositoryActionStatus>;
+  selection: SelectionIdentity[];
+  selectable: boolean;
+  onSelect: (identity: SelectionIdentity, additive: boolean) => void;
 }
 
 interface EditingCell {
@@ -27,7 +31,15 @@ interface EditingCell {
   error?: string;
 }
 
-export function AttributeTable({ features, activeLayer, disabled, onUpdateProperties }: AttributeTableProps) {
+export function AttributeTable({
+  features,
+  activeLayer,
+  disabled,
+  onUpdateProperties,
+  selection,
+  selectable,
+  onSelect,
+}: AttributeTableProps) {
   const activeFeatures = useMemo(
     () => features.filter((feature) => feature.layerId === activeLayer?.id),
     [activeLayer?.id, features]
@@ -53,6 +65,7 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
     () => filterAndSortFeatures(activeFeatures, filters, sort),
     [activeFeatures, filters, sort]
   );
+  const selectedKeys = useMemo(() => new Set(selection.map(selectionIdentityKey)), [selection]);
 
   const changeSort = (key: string) =>
     setSort((current) =>
@@ -148,79 +161,107 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
               </tr>
             </thead>
             <tbody>
-              {visibleFeatures.map((feature) => (
-                <tr key={feature.id}>
-                  <th scope="row" title={feature.id}>
-                    {feature.id}
-                  </th>
-                  {columns.slice(1).map((column) => {
-                    const key = column.propertyKey as string;
-                    const label = column.label;
-                    const value = feature.properties[key];
-                    const isEditing = editing?.featureId === feature.id && editing.key === key;
-                    if (value === undefined)
+              {visibleFeatures.map((feature) => {
+                const identity = persistentSelection(feature.id);
+                const selected = selectedKeys.has(selectionIdentityKey(identity));
+                return (
+                  <tr
+                    key={feature.id}
+                    data-attribute-selection={identity.kind}
+                    data-selected={selected ? "true" : undefined}
+                    aria-selected={selected}
+                    tabIndex={selectable && !disabled ? 0 : -1}
+                    onClick={(event) => {
+                      if (!selectable || disabled) return;
+                      onSelect(identity, event.ctrlKey || event.metaKey);
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        event.target === event.currentTarget &&
+                        (event.key === "Enter" || event.key === " ") &&
+                        selectable &&
+                        !disabled
+                      ) {
+                        event.preventDefault();
+                        onSelect(identity, event.ctrlKey || event.metaKey);
+                      }
+                    }}
+                  >
+                    <th scope="row" title={feature.id}>
+                      {feature.id}
+                    </th>
+                    {columns.slice(1).map((column) => {
+                      const key = column.propertyKey as string;
+                      const label = column.label;
+                      const value = feature.properties[key];
+                      const isEditing = editing?.featureId === feature.id && editing.key === key;
+                      if (value === undefined)
+                        return (
+                          <td key={key} className="attribute-table__missing">
+                            —
+                          </td>
+                        );
                       return (
-                        <td key={key} className="attribute-table__missing">
-                          —
+                        <td key={key}>
+                          {isEditing ? (
+                            <form
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                void save(feature, key, editing.draft);
+                              }}
+                            >
+                              <input
+                                autoFocus
+                                aria-label={`Edit ${label} for ${feature.id}`}
+                                aria-invalid={editing.error ? true : undefined}
+                                value={editing.draft}
+                                disabled={saving}
+                                onChange={(event) =>
+                                  setEditing((current) =>
+                                    current ? { ...current, draft: event.target.value, error: undefined } : current
+                                  )
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setEditing(undefined);
+                                  }
+                                }}
+                              />
+                              <div className="attribute-table__edit-actions">
+                                <button type="submit" disabled={saving}>
+                                  {saving ? "Saving…" : "Save"}
+                                </button>
+                                <button type="button" disabled={saving} onClick={() => setEditing(undefined)}>
+                                  Cancel
+                                </button>
+                              </div>
+                              {editing.error && <span role="alert">{editing.error}</span>}
+                            </form>
+                          ) : (
+                            <button
+                              type="button"
+                              className="attribute-table__value"
+                              disabled={disabled || saving}
+                              title={`Edit ${label}`}
+                              aria-label={`Edit ${label} for ${feature.id}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setEditing({ featureId: feature.id, key, draft: attributeEditorValue(value) });
+                              }}
+                            >
+                              {attributeDisplayValue(value)}
+                            </button>
+                          )}
                         </td>
                       );
-                    return (
-                      <td key={key}>
-                        {isEditing ? (
-                          <form
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              void save(feature, key, editing.draft);
-                            }}
-                          >
-                            <input
-                              autoFocus
-                              aria-label={`Edit ${label} for ${feature.id}`}
-                              aria-invalid={editing.error ? true : undefined}
-                              value={editing.draft}
-                              disabled={saving}
-                              onChange={(event) =>
-                                setEditing((current) =>
-                                  current ? { ...current, draft: event.target.value, error: undefined } : current
-                                )
-                              }
-                              onKeyDown={(event) => {
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  setEditing(undefined);
-                                }
-                              }}
-                            />
-                            <div className="attribute-table__edit-actions">
-                              <button type="submit" disabled={saving}>
-                                {saving ? "Saving…" : "Save"}
-                              </button>
-                              <button type="button" disabled={saving} onClick={() => setEditing(undefined)}>
-                                Cancel
-                              </button>
-                            </div>
-                            {editing.error && <span role="alert">{editing.error}</span>}
-                          </form>
-                        ) : (
-                          <button
-                            type="button"
-                            className="attribute-table__value"
-                            disabled={disabled || saving}
-                            title={`Edit ${label}`}
-                            aria-label={`Edit ${label} for ${feature.id}`}
-                            onClick={() =>
-                              setEditing({ featureId: feature.id, key, draft: attributeEditorValue(value) })
-                            }
-                          >
-                            {attributeDisplayValue(value)}
-                          </button>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

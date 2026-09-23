@@ -211,6 +211,69 @@ test("active layerの属性をsort/filter/editしてrefreshとreload後も保持
   });
 });
 
+test("Measure modeのattribute row selectionがSQL rowとstatusへ同期しfilterでも保持される", async ({ page }) => {
+  test.setTimeout(90_000);
+  await gotoApp(page);
+  await page.getByRole("button", { name: "Clear" }).click();
+  await page.locator("#geojson-file-input").setInputFiles({
+    name: "attribute-selection.geojson",
+    mimeType: "application/geo+json",
+    buffer: Buffer.from(JSON.stringify(attributeFixture)),
+  });
+  const attributesRadio = page.getByRole("radio", { name: "Set Attributes as active layer" });
+  await expect(attributesRadio).toBeEnabled({ timeout: 30_000 });
+  await attributesRadio.click();
+
+  const table = page.getByTestId("attribute-table");
+  const rows = table.locator('tbody tr[data-attribute-selection="persistent"]');
+  await expect(rows).toHaveCount(2);
+  const status = page.getByTestId("selection-status");
+  await page.getByRole("button", { name: "Measure" }).click();
+
+  // Row自身のkeyboard activation and Ctrl add/remove follow the same
+  // selection semantics as canvas and SQL result rows.
+  await rows.filter({ hasText: "attr-a" }).click();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
+  await expect(rows.filter({ hasText: "attr-a" })).toHaveAttribute("data-selected", "true");
+  await rows.filter({ hasText: "attr-a" }).press("Enter");
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
+  await rows.filter({ hasText: "attr-b" }).press("Control+Enter");
+  await expect(status).toHaveText(/選択: 2件/);
+  await rows.filter({ hasText: "attr-b" }).press("Control+Space");
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
+
+  // Interactive property buttons must not bubble Enter/Space into row selection.
+  await rows.filter({ hasText: "attr-b" }).click();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-b)");
+  const propertyButton = table.getByRole("button", { name: "Edit property: score for attr-a" });
+  await propertyButton.focus();
+  await propertyButton.press("Enter");
+  await expect(table.getByLabel("Edit property: score for attr-a")).toBeVisible();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-b)");
+  await table.getByRole("button", { name: "Cancel" }).click();
+  await propertyButton.focus();
+  await propertyButton.press("Space");
+  await expect(table.getByLabel("Edit property: score for attr-a")).toBeVisible();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-b)");
+  await table.getByRole("button", { name: "Cancel" }).click();
+
+  await rows.filter({ hasText: "attr-a" }).press("Enter");
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
+
+  await table.getByLabel("Filter Feature ID").fill("attr-b");
+  await expect(rows).toHaveCount(1);
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
+  await table.getByLabel("Filter Feature ID").fill("");
+
+  await page.getByTestId("sql-editor").fill("SELECT id FROM geometry_features ORDER BY id");
+  await page.getByRole("button", { name: "Run query" }).click();
+  await expect(page.getByTestId("query-status")).toHaveText("success", { timeout: 30_000 });
+  const queryRow = page.locator('tbody tr[data-query-selection="persistent"]').filter({ hasText: "attr-b" });
+  await queryRow.click();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-b)");
+  await expect(rows.filter({ hasText: "attr-b" })).toHaveAttribute("data-selected", "true");
+});
+
 test("attribute editorのEscapeはDraw中の未完strokeを確定しない", async ({ page }) => {
   test.setTimeout(90_000);
   await gotoApp(page);

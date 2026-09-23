@@ -269,6 +269,9 @@ export default function App() {
             activeLayer={activeLayer}
             disabled={loading}
             onUpdateProperties={updateFeatureProperties}
+            selection={selection}
+            selectable={selectable}
+            onSelect={onSelect}
           />
         </div>
         <SqlWorkbench
