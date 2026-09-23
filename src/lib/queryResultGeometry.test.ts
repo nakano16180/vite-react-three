@@ -131,4 +131,24 @@ describe("query result geometry", () => {
     expect(selectionIdentityKey(identities.get(0)!)).toBe("persistent:feature-1");
     expect(selectionIdentityKey(identities.get(1)!)).toBe("persistent:feature-2");
   });
+
+  it("canonical feature集合にないIDや非文字列IDをpersistentへ推測で紐付けない", () => {
+    const queryResult: QueryResult = {
+      ...result([
+        '{"type":"LineString","coordinates":[[0,0],[2,2]]}',
+        '{"type":"LineString","coordinates":[[2,0],[4,2]]}',
+      ]),
+      columns: [
+        { name: "id", type: "VARCHAR" },
+        { name: "geometry_geojson", type: "VARCHAR", geometryRole: "geojson" },
+      ],
+      rows: [
+        { id: "unrelated", geometry_geojson: '{"type":"LineString","coordinates":[[0,0],[2,2]]}' },
+        { id: 7, geometry_geojson: '{"type":"LineString","coordinates":[[2,0],[4,2]]}' },
+      ],
+    };
+    const identities = queryResultSelectionIdentities(queryResult, "query-6", new Set(["feature-1"]));
+    expect(selectionIdentityKey(identities.get(0)!)).toBe("temporary:query-6:0");
+    expect(selectionIdentityKey(identities.get(1)!)).toBe("temporary:query-6:1");
+  });
 });

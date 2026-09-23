@@ -265,6 +265,12 @@ test.describe("TASK-2.2 feature selection", () => {
     const box = await canvas.boundingBox();
     if (!box) throw new Error("drawing canvas bounding box was not available");
     const clickCanvas = (x: number, y: number) => page.mouse.click(box.x + x, box.y + y);
+    // The fixture polygon occupies model pixels 100..300 in both axes. Keep
+    // the clear point well inside the canvas while outside that known extent.
+    const clearPoint = {
+      x: Math.min(box.width - 24, 360),
+      y: Math.min(box.height - 24, 120),
+    };
     await clickCanvas(100, 100);
     await clickCanvas(300, 100);
     await clickCanvas(300, 300);
@@ -286,7 +292,7 @@ test.describe("TASK-2.2 feature selection", () => {
     await expect(status).toHaveText(`選択: 1件 (persistent:${polygonId})`);
     await clickCanvas(200, 100);
     await expect(status).toHaveText(`選択: 1件 (persistent:${polygonId})`);
-    await clickCanvas(box.width - 30, box.height - 30);
+    await clickCanvas(clearPoint.x, clearPoint.y);
     await expect(status).toHaveText("選択: 0件");
 
     // 3. Replace the polygon with a persistent line and render an ID-less temporary query line at identical coordinates.
@@ -403,7 +409,7 @@ test.describe("TASK-2.2 feature selection", () => {
     await page.keyboard.up("Control");
     await expect(status).toContainText("選択: 2件");
     await expect(status).toContainText(`persistent:${secondId}`);
-    await expect(page.locator('tbody tr[data-selected="true"]')).toHaveCount(2);
+    await expect(page.locator('tbody tr[data-query-selection][data-selected="true"]')).toHaveCount(2);
     await page.keyboard.down("Control");
     await page.mouse.click(secondMidpoint.x, secondMidpoint.y);
     await page.keyboard.up("Control");

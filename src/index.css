@@ -157,6 +157,12 @@ textarea {
   text-align: center;
 }
 
+.attribute-table tbody tr[data-selected="true"] th,
+.attribute-table tbody tr[data-selected="true"] td {
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
 .layer-panel {
   min-width: 0;
   overflow: auto;
