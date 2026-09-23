@@ -16,6 +16,8 @@ import type { DuckDBCapabilities } from "./createDuckDB";
 type Row = Record<string, unknown>;
 type InsertConflictPolicy = "error" | "ignore" | "replace";
 
+export type RepositoryActionStatus = "saved" | "checkpoint-uncertain" | "failed";
+
 export const CURRENT_SCHEMA_VERSION = 3;
 
 export class PersistenceCheckpointError extends Error {
@@ -408,6 +410,18 @@ export class GeometryRepository {
       } finally {
         await statement.close();
       }
+    }
+    await this.checkpoint();
+  }
+
+  async updateProperties(id: string, properties: Record<string, JsonValue>): Promise<void> {
+    await this.assertFeatureLayerExists(id);
+    const table = this.capabilities.store === "spatial" ? "features" : "features_json";
+    const statement = await this.connection.prepare(`UPDATE ${table} SET properties = CAST(? AS JSON) WHERE id = ?;`);
+    try {
+      await statement.query(JSON.stringify(properties), id);
+    } finally {
+      await statement.close();
     }
     await this.checkpoint();
   }
