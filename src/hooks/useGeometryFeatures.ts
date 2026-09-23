@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createDuckDB, type DuckDBContext, type FeatureStore } from "../db/createDuckDB";
-import { GeometryRepository, PersistenceCheckpointError } from "../db/geometryRepository";
+import { GeometryRepository, PersistenceCheckpointError, type RepositoryActionStatus } from "../db/geometryRepository";
 import {
   DEFAULT_LAYER_ID,
   createGeometryFeature,
@@ -20,6 +20,24 @@ import { createId } from "../lib/id";
 import { layerRenderRank } from "../lib/renderOrder";
 
 export type GeometryType = "line" | "polygon";
+
+export interface CheckpointRecoveryDecision {
+  status: RepositoryActionStatus;
+  shouldSetWarning: boolean;
+}
+
+export const checkpointRecoveryDecision = (
+  loaded: boolean,
+  expectedGeneration: number,
+  currentGeneration: number,
+  expectedRepository: GeometryRepository,
+  currentRepository: GeometryRepository | null
+): CheckpointRecoveryDecision => {
+  const recovered = loaded && expectedGeneration === currentGeneration && expectedRepository === currentRepository;
+  return recovered
+    ? { status: "checkpoint-uncertain", shouldSetWarning: true }
+    : { status: "failed", shouldSetWarning: false };
+};
 
 export interface StorageStatus {
   opfs: boolean;
@@ -115,35 +133,56 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
     };
   }, [loadRepositoryState]);
 
-  const runRepositoryAction = useCallback(
+  const runRepositoryActionResult = useCallback(
     (action: (repository: GeometryRepository) => Promise<void>, onSuccess?: () => void) =>
-      queueRef.current(async () => {
+      queueRef.current<RepositoryActionStatus>(async () => {
         const repository = repositoryRef.current;
         const generation = generationRef.current;
-        if (!repository) return false;
+        if (!repository) return "failed";
         setOperationNotice(undefined);
         try {
           await action(repository);
           const loaded = await loadRepositoryState(repository, generation);
-          if (loaded) onSuccess?.();
-          return loaded;
+          if (!loaded) return "failed";
+          onSuccess?.();
+          return "saved";
         } catch (error) {
-          if (generationRef.current === generation && repositoryRef.current === repository) {
-            if (error instanceof PersistenceCheckpointError) {
-              await loadRepositoryState(repository, generation);
-              setStorageStatus((current) => ({
-                ...current,
-                migrationWarning: errorMessage(error),
-                error: undefined,
-              }));
-            } else {
-              setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
+          if (generationRef.current !== generation || repositoryRef.current !== repository) return "failed";
+          if (error instanceof PersistenceCheckpointError) {
+            let loaded = false;
+            try {
+              loaded = await loadRepositoryState(repository, generation);
+            } catch {
+              return "failed";
             }
+            const decision = checkpointRecoveryDecision(
+              loaded,
+              generation,
+              generationRef.current,
+              repository,
+              repositoryRef.current
+            );
+            if (decision.status !== "checkpoint-uncertain") {
+              return "failed";
+            }
+            setStorageStatus((current) => ({
+              ...current,
+              migrationWarning: errorMessage(error),
+              error: undefined,
+            }));
+            return "checkpoint-uncertain";
           }
-          return false;
+          setStorageStatus((current) => ({ ...current, error: errorMessage(error) }));
+          return "failed";
         }
       }),
     [loadRepositoryState]
+  );
+
+  const runRepositoryAction = useCallback(
+    (action: (repository: GeometryRepository) => Promise<void>, onSuccess?: () => void) =>
+      runRepositoryActionResult(action, onSuccess).then((status) => status === "saved"),
+    [runRepositoryActionResult]
   );
 
   const handleRefresh = useCallback(
@@ -242,8 +281,8 @@ export function useGeometryFeatures(strokeColor: string, strokeWidth: number, si
 
   const updateFeatureProperties = useCallback(
     (id: string, properties: Record<string, JsonValue>) =>
-      runRepositoryAction((repository) => repository.updateProperties(id, properties)),
-    [runRepositoryAction]
+      runRepositoryActionResult((repository) => repository.updateProperties(id, properties)),
+    [runRepositoryActionResult]
   );
 
   const handleImportGeoJSON = useCallback(

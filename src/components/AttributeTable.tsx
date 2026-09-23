@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GeometryFeature, JsonValue, Layer } from "../domain/geometryFeature";
+import type { RepositoryActionStatus } from "../db/geometryRepository";
 import {
   attributeDisplayValue,
   attributeEditorValue,
   attributeKeys,
   attributePropertyColumnKey,
+  attributePropertyLabel,
   filterAndSortFeatures,
   parseAttributeValue,
+  propertyUpdateSucceeded,
   type AttributeSort,
 } from "../lib/attributeTable";
 
@@ -14,7 +17,7 @@ interface AttributeTableProps {
   features: GeometryFeature[];
   activeLayer?: Layer;
   disabled: boolean;
-  onUpdateProperties: (featureId: string, properties: Record<string, JsonValue>) => Promise<boolean>;
+  onUpdateProperties: (featureId: string, properties: Record<string, JsonValue>) => Promise<RepositoryActionStatus>;
 }
 
 interface EditingCell {
@@ -39,6 +42,13 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
     setSort(undefined);
     setEditing(undefined);
   }, [activeLayer?.id]);
+  useEffect(() => {
+    if (!editing) return;
+    const feature = activeFeatures.find((candidate) => candidate.id === editing.featureId);
+    if (!feature || !Object.prototype.hasOwnProperty.call(feature.properties, editing.key)) {
+      setEditing(undefined);
+    }
+  }, [activeFeatures, editing]);
   const visibleFeatures = useMemo(
     () => filterAndSortFeatures(activeFeatures, filters, sort),
     [activeFeatures, filters, sort]
@@ -64,7 +74,7 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
     setSaving(true);
     try {
       const saved = await onUpdateProperties(feature.id, { ...feature.properties, [key]: value });
-      if (saved) setEditing(undefined);
+      if (propertyUpdateSucceeded(saved)) setEditing(undefined);
       else {
         setEditing((current) =>
           current ? { ...current, error: "Save failed. The stored value was not changed." } : current
@@ -85,8 +95,12 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
   };
 
   const columns = [
-    { key: "id", label: "id", propertyKey: undefined },
-    ...keys.map((key) => ({ key: attributePropertyColumnKey(key), label: key, propertyKey: key })),
+    { key: "id", label: "Feature ID", propertyKey: undefined },
+    ...keys.map((key) => ({
+      key: attributePropertyColumnKey(key),
+      label: attributePropertyLabel(key),
+      propertyKey: key,
+    })),
   ];
   return (
     <section className="attribute-table" aria-label="Attribute table" data-testid="attribute-table">
@@ -141,6 +155,7 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
                   </th>
                   {columns.slice(1).map((column) => {
                     const key = column.propertyKey as string;
+                    const label = column.label;
                     const value = feature.properties[key];
                     const isEditing = editing?.featureId === feature.id && editing.key === key;
                     if (value === undefined)
@@ -160,7 +175,7 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
                           >
                             <input
                               autoFocus
-                              aria-label={`Edit ${key} for ${feature.id}`}
+                              aria-label={`Edit ${label} for ${feature.id}`}
                               aria-invalid={editing.error ? true : undefined}
                               value={editing.draft}
                               disabled={saving}
@@ -170,7 +185,11 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
                                 )
                               }
                               onKeyDown={(event) => {
-                                if (event.key === "Escape") setEditing(undefined);
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setEditing(undefined);
+                                }
                               }}
                             />
                             <div className="attribute-table__edit-actions">
@@ -188,8 +207,8 @@ export function AttributeTable({ features, activeLayer, disabled, onUpdateProper
                             type="button"
                             className="attribute-table__value"
                             disabled={disabled || saving}
-                            title={`Edit ${key}`}
-                            aria-label={`Edit ${key} for ${feature.id}`}
+                            title={`Edit ${label}`}
+                            aria-label={`Edit ${label} for ${feature.id}`}
                             onClick={() =>
                               setEditing({ featureId: feature.id, key, draft: attributeEditorValue(value) })
                             }

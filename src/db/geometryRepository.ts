@@ -16,6 +16,8 @@ import type { DuckDBCapabilities } from "./createDuckDB";
 type Row = Record<string, unknown>;
 type InsertConflictPolicy = "error" | "ignore" | "replace";
 
+export type RepositoryActionStatus = "saved" | "checkpoint-uncertain" | "failed";
+
 export const CURRENT_SCHEMA_VERSION = 3;
 
 export class PersistenceCheckpointError extends Error {

@@ -387,6 +387,36 @@ describe("OPFS durability", () => {
     );
   });
 
+  it("updatePropertiesはUPDATE適用後のCHECKPOINT失敗をdurability uncertainとして返す", async () => {
+    const updateQuery = vi.fn().mockResolvedValue(result());
+    const connection = {
+      query: vi.fn(async (sql: string) => {
+        if (sql === "CHECKPOINT;") throw new Error("disk full");
+        return result();
+      }),
+      prepare: vi.fn(async (sql: string) => ({
+        query: sql.startsWith("SELECT 1 AS present")
+          ? vi.fn().mockResolvedValue(result([{ present: 1 }]))
+          : updateQuery,
+        close: vi.fn().mockResolvedValue(undefined),
+      })),
+    } as unknown as AsyncDuckDBConnection;
+    const repository = new GeometryRepository(connection, {
+      opfs: true,
+      spatial: false,
+      store: "json",
+    });
+    const properties = { nested: { level: 2 }, empty: null, label: "updated", count: 3 } as const;
+
+    await expect(repository.updateProperties("durable-1", properties)).rejects.toEqual(
+      expect.objectContaining<PersistenceCheckpointError>({
+        name: "PersistenceCheckpointError",
+        message: expect.stringContaining("write succeeded"),
+      })
+    );
+    expect(updateQuery).toHaveBeenCalledWith(JSON.stringify(properties), "durable-1");
+  });
+
   it("migration COMMIT後のCHECKPOINT失敗はrollbackせずwarningを返す", async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql === "CHECKPOINT;") throw new Error("quota exceeded");

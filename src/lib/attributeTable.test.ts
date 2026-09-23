@@ -5,9 +5,11 @@ import {
   attributeEditorValue,
   attributeKeys,
   attributePropertyColumnKey,
+  attributePropertyLabel,
   filterAndSortFeatures,
   isJsonValue,
   parseAttributeValue,
+  propertyUpdateSucceeded,
 } from "./attributeTable";
 
 const feature = (id: string, properties: Record<string, JsonValue>) =>
@@ -54,6 +56,14 @@ describe("attribute table helpers", () => {
     expect(attributePropertyColumnKey("id")).toBe("property:id");
     expect(filterAndSortFeatures(features, { "property:id": "user-id" })).toHaveLength(1);
     expect(filterAndSortFeatures(features, {}, { key: "property:id", direction: "ascending" })).toEqual(features);
+  });
+
+  it("names every user property with a collision-safe namespace", () => {
+    expect(attributePropertyLabel("id")).toBe("property: id");
+    expect(attributePropertyLabel("properties.id")).toBe("property: properties.id");
+    expect(propertyUpdateSucceeded("saved")).toBe(true);
+    expect(propertyUpdateSucceeded("checkpoint-uncertain")).toBe(true);
+    expect(propertyUpdateSucceeded("failed")).toBe(false);
   });
 
   it("accepts every JSON value but rejects non-finite values nested in a JSON document", () => {

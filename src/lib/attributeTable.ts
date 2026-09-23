@@ -1,4 +1,5 @@
 import type { GeometryFeature, JsonValue } from "../domain/geometryFeature";
+import type { RepositoryActionStatus } from "../db/geometryRepository";
 
 export type AttributeSortDirection = "ascending" | "descending";
 
@@ -10,6 +11,10 @@ export interface AttributeSort {
 export const ATTRIBUTE_PROPERTY_PREFIX = "property:";
 
 export const attributePropertyColumnKey = (key: string): string => `${ATTRIBUTE_PROPERTY_PREFIX}${key}`;
+
+export const attributePropertyLabel = (key: string): string => `property: ${key}`;
+
+export const propertyUpdateSucceeded = (status: RepositoryActionStatus): boolean => status !== "failed";
 
 const propertyKeyFromColumnKey = (key: string): string =>
   key.startsWith(ATTRIBUTE_PROPERTY_PREFIX) ? key.slice(ATTRIBUTE_PROPERTY_PREFIX.length) : key;
