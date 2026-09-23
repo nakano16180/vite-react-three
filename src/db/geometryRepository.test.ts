@@ -123,12 +123,11 @@ describe("geometry repository store parity", () => {
 
     expect(prepare).toHaveBeenCalledTimes(2);
     expect(prepare.mock.calls[1][0]).not.toContain("ST_Simplify");
-    expect(query).toHaveBeenCalledOnce();
-    if (store === "spatial") {
-      expect(query).toHaveBeenCalledWith("LINESTRING(0 0, 1 0.25, 2 0)", "feature-1");
-    } else {
-      expect(query).toHaveBeenCalledWith("LineString", JSON.stringify(geometry.coordinates), "feature-1");
-    }
+    const expectedQueryArgs: string[] =
+      store === "spatial"
+        ? ["LINESTRING(0 0, 1 0.25, 2 0)", "feature-1"]
+        : ["LineString", JSON.stringify(geometry.coordinates), "feature-1"];
+    expect(query).toHaveBeenCalledExactlyOnceWith(...expectedQueryArgs);
   });
 
   it.each(["spatial", "json"] as const)("%s updateは同じcanonical Polygon頂点を保持する", async (store) => {
@@ -153,11 +152,11 @@ describe("geometry repository store parity", () => {
 
     await repository.updateGeometry("polygon-1", polygon);
 
-    if (store === "spatial") {
-      expect(query).toHaveBeenCalledWith("POLYGON((0 0, 3 0, 3 2, 0 0))", "polygon-1");
-    } else {
-      expect(query).toHaveBeenCalledWith("Polygon", JSON.stringify(polygon.coordinates), "polygon-1");
-    }
+    const expectedQueryArgs: string[] =
+      store === "spatial"
+        ? ["POLYGON((0 0, 3 0, 3 2, 0 0))", "polygon-1"]
+        : ["Polygon", JSON.stringify(polygon.coordinates), "polygon-1"];
+    expect(query).toHaveBeenCalledWith(...expectedQueryArgs);
   });
 
   it.each(["spatial", "json"] as const)(

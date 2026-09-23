@@ -60,19 +60,22 @@ export interface QueryResultGeometry {
 const featureIdColumn = (result: QueryResult): string | undefined =>
   result.columns.find((column) => column.name.toLowerCase() === "id")?.name;
 
+const rowValue = (row: Record<string, unknown>, columnName: string): unknown => Reflect.get(row, columnName);
+
 export const queryResultGeometries = (result: QueryResult): QueryResultGeometry[] => {
   const geometryColumn = result.columns.find((column) => column.geometryRole === "geojson");
   if (!geometryColumn) return [];
   const idColumn = featureIdColumn(result);
   return result.rows.flatMap((row, rowIndex) => {
-    const geometry = parseGeometry(row[geometryColumn.name]);
+    const geometry = parseGeometry(rowValue(row, geometryColumn.name));
     if (!geometry) return [];
     const properties = Object.fromEntries(
       result.columns
         .filter((column) => column.name !== geometryColumn.name)
-        .map((column) => [column.name, toJsonValue(row[column.name])])
+        .map((column) => [column.name, toJsonValue(rowValue(row, column.name))])
     );
-    const featureId = idColumn && typeof row[idColumn] === "string" ? row[idColumn] : undefined;
+    const idValue = idColumn ? rowValue(row, idColumn) : undefined;
+    const featureId = typeof idValue === "string" ? idValue : undefined;
     return [{ rowIndex, geometry, properties, ...(featureId ? { featureId } : {}) }];
   });
 };
@@ -105,7 +108,8 @@ export const queryResultSelectionIdentities = (
   const geometryRows = new Set(queryResultGeometries(result).map(({ rowIndex }) => rowIndex));
   const idColumn = featureIdColumn(result);
   for (const [rowIndex, row] of result.rows.entries()) {
-    const featureId = idColumn && typeof row[idColumn] === "string" ? row[idColumn] : undefined;
+    const idValue = idColumn ? rowValue(row, idColumn) : undefined;
+    const featureId = typeof idValue === "string" ? idValue : undefined;
     if (featureId && persistentFeatureIds.has(featureId)) identities.set(rowIndex, persistentSelection(featureId));
     else if (geometryRows.has(rowIndex)) identities.set(rowIndex, temporarySelection(queryKey, rowIndex));
   }

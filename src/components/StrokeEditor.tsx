@@ -57,7 +57,8 @@ export function StrokeEditor({ strokes, onUpdateStroke, enabled }: StrokeEditorP
       );
       return { ...s, ptsPx: newPtsPx };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `worldToPx` is a pure converter over the current Three.js viewport values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable within this render's viewport snapshot.
   }, [strokes, selected, dragWorld, size, viewport]);
 
   const onPlanePointerDown = (e: { stopPropagation: () => void; point: { x: number; y: number; z: number } }) => {
@@ -71,6 +72,8 @@ export function StrokeEditor({ strokes, onUpdateStroke, enabled }: StrokeEditorP
     let nearest: { strokeId: string; ptIndex: number; dist: number } | null = null;
     for (const s of strokes) {
       for (let i = 0; i < s.ptsPx.length; i++) {
+        // `i` is the bounded index produced by the point-array loop.
+        // eslint-disable-next-line security/detect-object-injection -- range-checked array index, not an external object key.
         const [wx, wy] = pxToWorld(s.ptsPx[i][0], s.ptsPx[i][1]);
         const dist = Math.hypot(wx - cx, wy - cy);
         if (dist <= hitRadius && (!nearest || dist < nearest.dist)) {
