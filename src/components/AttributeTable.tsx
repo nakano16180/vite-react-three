@@ -176,7 +176,12 @@ export function AttributeTable({
                       onSelect(identity, event.ctrlKey || event.metaKey);
                     }}
                     onKeyDown={(event) => {
-                      if ((event.key === "Enter" || event.key === " ") && selectable && !disabled) {
+                      if (
+                        event.target === event.currentTarget &&
+                        (event.key === "Enter" || event.key === " ") &&
+                        selectable &&
+                        !disabled
+                      ) {
                         event.preventDefault();
                         onSelect(identity, event.ctrlKey || event.metaKey);
                       }

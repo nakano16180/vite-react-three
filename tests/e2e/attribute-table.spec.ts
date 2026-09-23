@@ -230,10 +230,34 @@ test("Measure modeのattribute row selectionがSQL rowとstatusへ同期しfilte
   const status = page.getByTestId("selection-status");
   await page.getByRole("button", { name: "Measure" }).click();
 
+  // Row自身のkeyboard activation and Ctrl add/remove follow the same
+  // selection semantics as canvas and SQL result rows.
   await rows.filter({ hasText: "attr-a" }).click();
   await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
   await expect(rows.filter({ hasText: "attr-a" })).toHaveAttribute("data-selected", "true");
-  await table.getByRole("button", { name: "Edit property: score for attr-a" }).click();
+  await rows.filter({ hasText: "attr-a" }).press("Enter");
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
+  await rows.filter({ hasText: "attr-b" }).press("Control+Enter");
+  await expect(status).toHaveText(/選択: 2件/);
+  await rows.filter({ hasText: "attr-b" }).press("Control+Space");
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
+
+  // Interactive property buttons must not bubble Enter/Space into row selection.
+  await rows.filter({ hasText: "attr-b" }).click();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-b)");
+  const propertyButton = table.getByRole("button", { name: "Edit property: score for attr-a" });
+  await propertyButton.focus();
+  await propertyButton.press("Enter");
+  await expect(table.getByLabel("Edit property: score for attr-a")).toBeVisible();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-b)");
+  await table.getByRole("button", { name: "Cancel" }).click();
+  await propertyButton.focus();
+  await propertyButton.press("Space");
+  await expect(table.getByLabel("Edit property: score for attr-a")).toBeVisible();
+  await expect(status).toHaveText("選択: 1件 (persistent:attr-b)");
+  await table.getByRole("button", { name: "Cancel" }).click();
+
+  await rows.filter({ hasText: "attr-a" }).press("Enter");
   await expect(status).toHaveText("選択: 1件 (persistent:attr-a)");
 
   await table.getByLabel("Filter Feature ID").fill("attr-b");
