@@ -41,13 +41,13 @@ const simplifyDouglasPeucker = (points: Point2D[], tolerance: number): Point2D[]
   let furthestIndex = -1;
   let furthestDistance = threshold;
   for (let index = 1; index < points.length - 1; index += 1) {
-    const distance = squaredSegmentDistance(points[index], points[0], points[points.length - 1]);
+    const distance = squaredSegmentDistance(points.at(index)!, points.at(0)!, points.at(-1)!);
     if (distance > furthestDistance) {
       furthestIndex = index;
       furthestDistance = distance;
     }
   }
-  if (furthestIndex === -1) return [copyPoint(points[0]), copyPoint(points[points.length - 1])];
+  if (furthestIndex === -1) return [copyPoint(points.at(0)!), copyPoint(points.at(-1)!)];
   const left = simplifyDouglasPeucker(points.slice(0, furthestIndex + 1), tolerance);
   const right = simplifyDouglasPeucker(points.slice(furthestIndex), tolerance);
   return [...left.slice(0, -1), ...right];
@@ -66,7 +66,7 @@ export const simplifyFeatureGeometry = (geometry: FeatureGeometry, tolerance: nu
   let furthestIndex = 1;
   let furthestDistance = -1;
   for (let index = 1; index < copied.length - 1; index += 1) {
-    const distance = squaredSegmentDistance(copied[index], copied[0], copied[copied.length - 1]);
+    const distance = squaredSegmentDistance(copied.at(index)!, copied.at(0)!, copied.at(-1)!);
     if (distance > furthestDistance) {
       furthestIndex = index;
       furthestDistance = distance;
@@ -74,7 +74,7 @@ export const simplifyFeatureGeometry = (geometry: FeatureGeometry, tolerance: nu
   }
   return {
     type: "Polygon",
-    coordinates: [copyPoint(copied[0]), copyPoint(copied[furthestIndex]), copyPoint(copied[copied.length - 1])],
+    coordinates: [copyPoint(copied.at(0)!), copyPoint(copied.at(furthestIndex)!), copyPoint(copied.at(-1)!)],
   };
 };
 

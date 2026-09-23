@@ -193,6 +193,8 @@ export function AttributeTable({
                     {columns.slice(1).map((column) => {
                       const key = column.propertyKey as string;
                       const label = column.label;
+                      // Property keys come from the feature schema and are used only for table lookup.
+                      // eslint-disable-next-line security/detect-object-injection -- this is a validated feature property key.
                       const value = feature.properties[key];
                       const isEditing = editing?.featureId === feature.id && editing.key === key;
                       if (value === undefined)

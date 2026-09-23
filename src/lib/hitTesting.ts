@@ -34,7 +34,7 @@ const strokeEdgeDistance = (point: Point2D, stroke: RenderableStroke): number =>
   const points = stroke.geomType === "polygon" ? [...stroke.ptsPx, stroke.ptsPx[0]] : stroke.ptsPx;
   let distance = Infinity;
   for (let index = 0; index < points.length - 1; index += 1) {
-    distance = Math.min(distance, segmentDistance(point, points[index], points[index + 1]));
+    distance = Math.min(distance, segmentDistance(point, points.at(index)!, points.at(index + 1)!));
   }
   return distance;
 };

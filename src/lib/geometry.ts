@@ -6,8 +6,8 @@ export const pointsEqual = ([ax, ay]: Point2D, [bx, by]: Point2D) => ax === bx &
 export const getPolylineLength = (points: Point2D[]) => {
   let length = 0;
   for (let i = 1; i < points.length; i++) {
-    const [x1, y1] = points[i - 1];
-    const [x2, y2] = points[i];
+    const [x1, y1] = points.at(i - 1)!;
+    const [x2, y2] = points.at(i)!;
     length += Math.hypot(x2 - x1, y2 - y1);
   }
   return length;
@@ -16,8 +16,8 @@ export const getPolylineLength = (points: Point2D[]) => {
 export const getPolygonArea = (points: Point2D[]) => {
   let area = 0;
   for (let i = 0; i < points.length; i++) {
-    const [x1, y1] = points[i];
-    const [x2, y2] = points[(i + 1) % points.length];
+    const [x1, y1] = points.at(i)!;
+    const [x2, y2] = points.at((i + 1) % points.length)!;
     area += x1 * y2 - x2 * y1;
   }
   return Math.abs(area) / 2;
@@ -25,7 +25,7 @@ export const getPolygonArea = (points: Point2D[]) => {
 
 export const getPolygonPerimeter = (points: Point2D[]) => {
   if (points.length < 2) return 0;
-  return getPolylineLength([...points, points[0]]);
+  return getPolylineLength([...points, points.at(0)!]);
 };
 
 export const isPointInPolygon = (point: Point2D, polygon: Point2D[], epsilon = 1e-9): boolean => {
@@ -33,8 +33,8 @@ export const isPointInPolygon = (point: Point2D, polygon: Point2D[], epsilon = 1
   let inside = false;
   const [px, py] = point;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const [xi, yi] = polygon[i];
-    const [xj, yj] = polygon[j];
+    const [xi, yi] = polygon.at(i)!;
+    const [xj, yj] = polygon.at(j)!;
     const dx = xj - xi;
     const dy = yj - yi;
     const cross = (px - xi) * dy - (py - yi) * dx;
@@ -55,7 +55,7 @@ export const getCentroid = (points: Point2D[]): Point2D => {
 
 export const isPolygonCloseCandidate = (points: Point2D[], thresholdPx = 20) => {
   if (points.length < 4) return false;
-  const [startX, startY] = points[0];
-  const [endX, endY] = points[points.length - 1];
+  const [startX, startY] = points.at(0)!;
+  const [endX, endY] = points.at(-1)!;
   return Math.hypot(endX - startX, endY - startY) <= thresholdPx;
 };

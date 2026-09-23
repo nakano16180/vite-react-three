@@ -45,6 +45,8 @@ export function LayerPanel({
     const next = [...layers];
     const target = index + offset;
     if (target < 0 || target >= next.length) return;
+    // Both indices are derived from the bounded layer position and adjacent offset.
+    // eslint-disable-next-line security/detect-object-injection -- range-checked array indices, not external object keys.
     [next[index], next[target]] = [next[target], next[index]];
     void runLayerAction(() => onReorder(next.map(({ id }) => id)));
   };

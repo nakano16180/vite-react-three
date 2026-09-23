@@ -23,6 +23,8 @@ export const queryRenderRank = (layerCount: number): number => Math.max(0, layer
 export const drawingRenderRank = (layerCount: number): number => Math.max(0, layerCount) + 2;
 
 export const renderOrderFor = (rank: number, element: RenderElement): number =>
+  // `element` is a closed union, so this lookup cannot be controlled by arbitrary input.
+  // eslint-disable-next-line security/detect-object-injection -- safe lookup in the fixed RenderElement table.
   Math.max(0, rank) * RENDER_ORDER_LAYER_STRIDE + ELEMENT_OFFSET[element];
 
 export const persistentRenderOrder = (layerIndex: number, layerCount: number, element: RenderElement): number =>

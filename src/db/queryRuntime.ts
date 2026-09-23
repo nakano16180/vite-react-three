@@ -17,14 +17,14 @@ const scrubSql = (sql: string): string => {
   let output = "";
   let index = 0;
   while (index < sql.length) {
-    const char = sql[index];
-    const next = sql[index + 1];
+    const char = sql.charAt(index);
+    const next = sql.charAt(index + 1);
     if (char === "-" && next === "-") {
-      while (index < sql.length && sql[index] !== "\n") index += 1;
+      while (index < sql.length && sql.charAt(index) !== "\n") index += 1;
       output += "\n";
     } else if (char === "/" && next === "*") {
       index += 2;
-      while (index < sql.length && !(sql[index] === "*" && sql[index + 1] === "/")) index += 1;
+      while (index < sql.length && !(sql.charAt(index) === "*" && sql.charAt(index + 1) === "/")) index += 1;
       index += 2;
       output += " ";
     } else if (char === "'" || char === '"' || char === "`") {
@@ -32,9 +32,9 @@ const scrubSql = (sql: string): string => {
       output += " ";
       index += 1;
       while (index < sql.length) {
-        if (sql[index] === quote && sql[index + 1] === quote) {
+        if (sql.charAt(index) === quote && sql.charAt(index + 1) === quote) {
           index += 2;
-        } else if (sql[index] === quote) {
+        } else if (sql.charAt(index) === quote) {
           index += 1;
           break;
         } else {

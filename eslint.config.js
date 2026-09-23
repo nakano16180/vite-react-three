@@ -5,6 +5,8 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 import prettier from "eslint-plugin-prettier";
 import prettierConfig from "eslint-config-prettier";
+import pluginSecurity from "eslint-plugin-security";
+import vitest from "@vitest/eslint-plugin";
 import { globalIgnores } from "eslint/config";
 
 export default tseslint.config([
@@ -17,6 +19,7 @@ export default tseslint.config([
       reactHooks.configs["recommended-latest"],
       reactRefresh.configs.vite,
       prettierConfig,
+      pluginSecurity.configs.recommended,
     ],
     plugins: {
       prettier,
@@ -34,5 +37,9 @@ export default tseslint.config([
     languageOptions: {
       globals: globals.node,
     },
+  },
+  {
+    ...vitest.configs.recommended,
+    files: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
 ]);
