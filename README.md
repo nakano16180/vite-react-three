@@ -1,10 +1,40 @@
-# DuckDB Spatial Geometry Workbench
+# DuckDB Spatial Lab
+
+Draw geometry, explore it with SQL, and see the results on a canvas — a browser-based playground for DuckDB Spatial.
+
+[Landing page](https://nakano16180.github.io/vite-react-three/) ·
+[Open playground](https://nakano16180.github.io/vite-react-three/playground/)
+
+![DuckDB Spatial playground with geometry, layers, attributes, and SQL results](public/screenshots/playground.png)
+
+[Landing page screenshot](public/screenshots/landing.png). Screenshots were captured in a desktop browser at
+1600 × 1000; the playground capture shows three SQL-generated features saved as a layer, measurements, attributes,
+and an area query. The landing screenshot includes the full page.
+
+## Try it
+
+1. Open the playground in a desktop browser and wait for initialization.
+2. In **Examples**, choose **Construct geometry**, then click **Run query**.
+3. Inspect the line on the canvas and its GeoJSON in the result table.
+4. Click **Save as layer** to keep supported result geometry in the feature store.
+5. Draw more shapes or import GeoJSON, then query `geometry_features` to explore them.
+
+Spatial examples require the Spatial extension to load. Coordinates are canvas pixels, not geographic coordinates;
+lengths and areas are in pixels and square pixels. OPFS persistence depends on browser support; the footer reports
+whether storage is persistent or session-only. Export GeoJSON to keep a portable copy.
 
 A browser-based geometry drawing and measurement workbench built with Vite, React, TypeScript, React Three Fiber, and DuckDB WASM.
 
 The app lets you draw lines and polygons on a 2D Three.js canvas, persist them in DuckDB, measure length/area/perimeter, edit saved points, and import or export GeoJSON.
 
 ## Features
+
+- SQL workbench: single read-only `SELECT` / `WITH...SELECT` statements, examples, session history, cancellation,
+  and tabular results capped at 1,000 rows. Queries use a separate in-memory snapshot of features and layers.
+- Result geometry: supported `geometry_geojson` results appear temporarily on the canvas and can be saved to a new layer.
+- Layers: rename, reorder, toggle visibility, choose the active drawing layer, and delete layers.
+- Attributes: sorting, filtering, inline property editing, and selection synchronized with the canvas and SQL results.
+- The landing page introduces the lab without initializing DuckDB; the full workbench lives at `playground/`.
 
 - Draw mode: click points on the canvas, then press Escape or double-click to save.
 - Polygon detection: close a shape by ending near the first point.
@@ -41,6 +71,32 @@ Start the development server:
 npm run dev
 ```
 
+Open `/vite-react-three/` for the landing page or `/vite-react-three/playground/` for the app.
+
+## SQL example
+
+With Spatial available, this query constructs a line without importing or drawing any features:
+
+```sql
+SELECT ST_AsGeoJSON(
+  ST_GeomFromText('LINESTRING (100 100, 300 200)')
+) AS geometry_geojson;
+```
+
+To query existing drawings, use the `geometry_features` view. The `geometry_layers` view exposes layer metadata.
+For example:
+
+```sql
+SELECT id, geometry_type, geometry_geojson, layer_id
+FROM geometry_features
+ORDER BY feature_order;
+```
+
+The `geometry_geojson` column enables result rendering for supported lines and hole-free polygons. Result features
+remain temporary until **Save as layer** is used; saving again creates a new layer and new IDs.
+
+## Production and GitHub Pages
+
 Build for production:
 
 ```sh
@@ -52,6 +108,15 @@ Preview a production build:
 ```sh
 npm run preview
 ```
+
+Vite builds two HTML entry points: `dist/index.html` (landing page) and `dist/playground/index.html` (workbench).
+This allows GitHub Pages to serve direct links and reloads at `/vite-react-three/playground/` without an SPA fallback.
+The Vite `base` remains `/vite-react-three/`; use the trailing slash for the playground directory URL.
+The existing GitHub Actions workflow deploys `dist` on pushes to `main`.
+
+The database name remains `opfs://vite-react-three.duckdb`. Moving the app within the same origin does not intentionally
+change its storage identity. GitHub Pages does not use the development server's isolation headers, so check the
+runtime storage indicator instead of assuming OPFS is available.
 
 ## Scripts
 
@@ -70,6 +135,8 @@ npm run preview
 
 ## App Structure
 
+- `src/landing.tsx`, `src/LandingPage.tsx`, `src/landing.css`: standalone landing page.
+- `playground/index.html`, `src/main.tsx`: workbench entry point.
 - `src/App.tsx`: application layout and mode wiring.
 - `src/domain/geometryFeature.ts`: canonical feature, geometry, style, and layer model.
 - `src/domain/renderableStroke.ts`: conversion from canonical features to rendering and measurement data, including
@@ -78,6 +145,9 @@ npm run preview
 - `src/db/geometryRepository.ts`: store-independent feature and layer persistence, migration, and transactions.
 - `src/hooks/useGeometryFeatures.ts`: React feature state and serialized repository operations.
 - `src/components/Header.tsx`: toolbar controls.
+- `src/components/SqlWorkbench.tsx`, `src/hooks/useQueryWorkbench.ts`: SQL editor, results, history, and result promotion.
+- `src/db/queryRuntime.ts`, `src/db/queryViews.ts`: separate query runtime and read-only feature/layer views.
+- `src/components/LayerPanel.tsx`, `src/components/AttributeTable.tsx`: layers, properties, and linked selection.
 - `src/components/DrawingSurface.tsx`: canvas drawing interactions.
 - `src/components/Scene.tsx`: feature, measurement, and polygon rendering.
 - `src/components/StrokeEditor.tsx`: point editing.

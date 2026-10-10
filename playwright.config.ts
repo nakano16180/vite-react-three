@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173);
-const baseURL = `http://127.0.0.1:${port}/vite-react-three/`;
+const baseURL = `http://127.0.0.1:${port}/vite-react-three/playground/`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
