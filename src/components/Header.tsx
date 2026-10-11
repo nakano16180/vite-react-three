@@ -49,6 +49,9 @@ export function Header({
       }}
     >
       <h1 style={{ fontSize: 16, fontWeight: 600, margin: 0, flex: "1 1 220px" }}>
+        <a href={import.meta.env.BASE_URL} style={{ color: "inherit", fontSize: 12 }}>
+          ← Home
+        </a>{" "}
         DuckDB Spatial × R3F — Geometry Workbench
       </h1>
       <div

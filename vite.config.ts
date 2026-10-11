@@ -5,6 +5,11 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   base: "/vite-react-three/",
+  build: {
+    rollupOptions: {
+      input: { landing: "index.html", playground: "playground/index.html" },
+    },
+  },
   server: {
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
