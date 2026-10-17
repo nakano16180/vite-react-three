@@ -3,13 +3,18 @@ default_permissions = "project-edit"
 [features]
 network_proxy = true
 
+[permissions.project-edit]
+description = "Workspace default"
+extends = ":workspace"
+
 [permissions.project-edit.filesystem]
+# Though in practice, a software agent needs to be able to read folders that
+# contain common tools, such as `/usr/bin`, to get work done, so grant access
+# to a "minimal" set of files and folders, as determined by Codex.
 ":minimal" = "read"
 
 [permissions.project-edit.filesystem.":workspace_roots"]
 "." = "write"
-".devcontainer" = "read"
-"**/*.env" = "deny"
 
 [permissions.project-edit.network]
 enabled = true
